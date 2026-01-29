@@ -20,6 +20,7 @@ class CodeGen {
     llvm::FunctionCallee ScanfFunc;
     llvm::Value *PrintfFormatStr;
     llvm::Value *ScanfFormatStr;
+    llvm::Value *emitExpr(ExprAST *Expr);
 
     void SetupExternalFunctions();
 

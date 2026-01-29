@@ -13,7 +13,17 @@ enum Token {
     tok_identifier = -6,
     tok_number = -7,
     tok_assign = -8,     // <-
-    tok_colon = -9       // :
+    tok_colon = -9,      // :
+
+    tok_if = -10,
+    tok_then = -11,
+    tok_else = -12,
+    tok_endif = -13,
+    
+    tok_eq = -20, // =
+    tok_ne = -21, // <>
+    tok_le = -22, // <=
+    tok_ge = -23  // >=
 };
 
 class Lexer {

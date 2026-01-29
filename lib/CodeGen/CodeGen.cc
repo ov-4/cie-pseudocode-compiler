@@ -49,17 +49,10 @@ void CodeGen::compile(const std::vector<std::unique_ptr<StmtAST>> &Statements) {
         }
         // ASSIGNMENT (x <- expr) 
         else if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt.get())) {
-            Value *Val = nullptr;
-            if (auto *Num = dynamic_cast<NumberExprAST*>(Assign->getExpr())) {
-                Val = ConstantInt::get(*TheContext, APInt(32, Num->getVal()));
-            } else if (auto *Var = dynamic_cast<VariableExprAST*>(Assign->getExpr())) {
-                 AllocaInst *A = NamedValues[Var->getName()];
-                 Val = Builder->CreateLoad(Type::getInt32Ty(*TheContext), A, Var->getName());
-            }
-
-            AllocaInst *Alloca = NamedValues[Assign->getName()];
-            if (Alloca && Val) {
-                Builder->CreateStore(Val, Alloca);
+            Value *Val = emitExpr(Assign->getExpr());
+            if (Val) {
+                AllocaInst *Alloca = NamedValues[Assign->getName()];
+                if (Alloca) Builder->CreateStore(Val, Alloca);
             }
         }
         // INPUT 
@@ -74,13 +67,7 @@ void CodeGen::compile(const std::vector<std::unique_ptr<StmtAST>> &Statements) {
         }
         // OUTPUT
         else if (auto *Out = dynamic_cast<OutputStmtAST*>(Stmt.get())) {
-            Value *Val = nullptr;
-            if (auto *Num = dynamic_cast<NumberExprAST*>(Out->getExpr())) {
-                Val = ConstantInt::get(*TheContext, APInt(32, Num->getVal()));
-            } else if (auto *Var = dynamic_cast<VariableExprAST*>(Out->getExpr())) {
-                 AllocaInst *A = NamedValues[Var->getName()];
-                 Val = Builder->CreateLoad(Type::getInt32Ty(*TheContext), A, Var->getName());
-            }
+            Value *Val = emitExpr(Out->getExpr());
 
             if (Val) {
                 // printf("%d\n", val)
@@ -99,4 +86,39 @@ void CodeGen::compile(const std::vector<std::unique_ptr<StmtAST>> &Statements) {
 
 void CodeGen::print() {
     TheModule->print(errs(), nullptr);
+}
+
+Value *CodeGen::emitExpr(ExprAST *Expr) {
+    if (!Expr) return nullptr;
+
+    if (auto *Num = dynamic_cast<NumberExprAST*>(Expr)) {
+        return ConstantInt::get(*TheContext, APInt(32, Num->getVal(), true)); 
+    }
+    
+    if (auto *Var = dynamic_cast<VariableExprAST*>(Expr)) {
+        AllocaInst *A = NamedValues[Var->getName()];
+        if (!A) {
+            fprintf(stderr, "Error: Unknown variable name %s\n", Var->getName().c_str());
+            return nullptr;
+        }
+        return Builder->CreateLoad(Type::getInt32Ty(*TheContext), A, Var->getName().c_str());
+    }
+
+    if (auto *Bin = dynamic_cast<BinaryExprAST*>(Expr)) {
+        Value *L = emitExpr(Bin->getLHS());
+        Value *R = emitExpr(Bin->getRHS());
+        if (!L || !R) return nullptr;
+
+        switch (Bin->getOp()) {
+        case '+': return Builder->CreateAdd(L, R, "addtmp");
+        case '-': return Builder->CreateSub(L, R, "subtmp");
+        case '*': return Builder->CreateMul(L, R, "multmp");
+        case '/': return Builder->CreateSDiv(L, R, "divtmp");
+        default:  
+            fprintf(stderr, "Error: Invalid binary operator\n");
+            return nullptr;
+        }
+    }
+
+    return nullptr;
 }
