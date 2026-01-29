@@ -11,7 +11,7 @@ class Parser {
     Lexer &Lex;
     int CurTok;
     
-    std::map<char, int> BinopPrecedence;
+    std::map<int, int> BinopPrecedence;
 
     int getNextToken();
     int GetTokPrecedence();

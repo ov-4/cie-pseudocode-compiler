@@ -9,12 +9,18 @@ Parser::Parser(Lexer &L) : Lex(L) {
     BinopPrecedence[tok_ne] = 10;
     BinopPrecedence[tok_le] = 10;
     BinopPrecedence[tok_ge] = 10;
+
     BinopPrecedence['<'] = 10;
     BinopPrecedence['>'] = 10;
+
+    BinopPrecedence['+'] = 20;
+    BinopPrecedence['-'] = 20;
+    BinopPrecedence['*'] = 40;
+    BinopPrecedence['/'] = 40;
 }
 
 int Parser::GetTokPrecedence() {
-    if (!isascii(CurTok)) return -1;
+    if (BinopPrecedence.find(CurTok) == BinopPrecedence.end()) return -1;
     int TokPrec = BinopPrecedence[CurTok];
     if (TokPrec <= 0) return -1;
     return TokPrec;
