@@ -39,6 +39,30 @@ std::unique_ptr<ExprAST> Parser::ParseNumberExpr() {
 std::unique_ptr<ExprAST> Parser::ParseIdentifierExpr() {
     std::string IdName = Lex.IdentifierStr;
     getNextToken();
+    
+    if (CurTok == '[') {
+        getNextToken();
+        std::vector<std::unique_ptr<ExprAST>> Indices;
+        
+        while (true) {
+            auto Exp = ParseExpression();
+            if (!Exp) return nullptr;
+            Indices.push_back(std::move(Exp));
+            
+            if (CurTok == ']') {
+                break;
+            }
+            if (CurTok == ',') {
+                getNextToken();
+                continue;
+            }
+            fprintf(stderr, "Error: Expected ',' or ']' in array index\n");
+            return nullptr;
+        }
+        getNextToken(); 
+        return std::make_unique<ArrayAccessExprAST>(IdName, std::move(Indices));
+    }
+    
     return std::make_unique<VariableExprAST>(IdName);
 }
 
@@ -102,6 +126,72 @@ std::vector<std::unique_ptr<StmtAST>> Parser::Parse() {
         }
     }
     return Statements;
+}
+
+std::unique_ptr<StmtAST> Parser::ParseDeclare() {
+    getNextToken(); 
+    if (CurTok != tok_identifier) return nullptr;
+    std::string Name = Lex.IdentifierStr;
+    getNextToken();
+    
+    if (CurTok != tok_colon) return nullptr;
+    getNextToken();
+    
+    if (CurTok == tok_array) {
+        getNextToken(); 
+        if (CurTok != '[') {
+            fprintf(stderr, "Error: Expected '[' after ARRAY\n");
+            return nullptr;
+        }
+        getNextToken();
+        
+        std::vector<std::pair<std::unique_ptr<ExprAST>, std::unique_ptr<ExprAST>>> Bounds;
+        
+        while (true) {
+            auto Lower = ParseExpression();
+            if (!Lower) return nullptr;
+            
+            if (CurTok != tok_colon) {
+                fprintf(stderr, "Error: Expected ':' in array range (e.g. 1:10)\n");
+                return nullptr;
+            }
+            getNextToken();
+            
+            auto Upper = ParseExpression();
+            if (!Upper) return nullptr;
+            
+            Bounds.push_back({std::move(Lower), std::move(Upper)});
+            
+            if (CurTok == ']') break;
+            if (CurTok == ',') {
+                getNextToken();
+                continue;
+            }
+            fprintf(stderr, "Error: Expected ',' or ']' in array dims\n");
+            return nullptr;
+        }
+        getNextToken();
+        
+        if (CurTok != tok_of) {
+            fprintf(stderr, "Error: Expected OF after array dims\n");
+            return nullptr;
+        }
+        getNextToken();
+        
+        if (CurTok != tok_integer_kw) {
+             fprintf(stderr, "Error: Only INTEGER arrays supported currently\n");
+             return nullptr;
+        }
+        getNextToken();
+        
+        return std::make_unique<ArrayDeclareStmtAST>(Name, std::move(Bounds), "INTEGER");
+    } 
+    else if (CurTok == tok_integer_kw) {
+        getNextToken();
+        return std::make_unique<DeclareStmtAST>(Name);
+    }
+    
+    return nullptr;
 }
 
 std::unique_ptr<StmtAST> Parser::ParseIfStmt() {
@@ -248,19 +338,32 @@ std::unique_ptr<StmtAST> Parser::ParseForStmt() {
 
 std::unique_ptr<StmtAST> Parser::ParseStatement() {
     if (CurTok == tok_declare) {
-        getNextToken();
-        if (CurTok != tok_identifier) return nullptr;
-        std::string Name = Lex.IdentifierStr;
-        getNextToken();
-        if (CurTok != tok_colon) return nullptr;
-        getNextToken();
-        if (CurTok != tok_integer_kw) return nullptr;
-        getNextToken();
-        return std::make_unique<DeclareStmtAST>(Name);
+        return ParseDeclare();
     }
     else if (CurTok == tok_identifier) {
         std::string Name = Lex.IdentifierStr;
         getNextToken();
+        
+        if (CurTok == '[') {
+            getNextToken();
+            std::vector<std::unique_ptr<ExprAST>> Indices;
+            while (true) {
+                auto Exp = ParseExpression();
+                Indices.push_back(std::move(Exp));
+                if (CurTok == ']') break;
+                if (CurTok == ',') getNextToken();
+            }
+            getNextToken();
+            
+            if (CurTok != tok_assign) {
+                fprintf(stderr, "Error: Expected '<-' after array access in assignment\n");
+                return nullptr;
+            }
+            getNextToken();
+            auto Expr = ParseExpression();
+            return std::make_unique<ArrayAssignStmtAST>(Name, std::move(Indices), std::move(Expr));
+        }
+        
         if (CurTok != tok_assign) return nullptr;
         getNextToken();
         auto Expr = ParseExpression();

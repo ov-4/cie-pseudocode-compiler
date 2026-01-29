@@ -1,14 +1,19 @@
 #include "cps/CodeGen.h"
+#include "cps/ArrayHandler.h"
 #include "llvm/IR/Verifier.h"
 #include "cps/Lexer.h"
 
 using namespace llvm;
 using namespace cps;
 
+CodeGen::~CodeGen() = default;
+
 CodeGen::CodeGen() {
     TheContext = std::make_unique<LLVMContext>();
     TheModule = std::make_unique<Module>("cps_module", *TheContext);
     Builder = std::make_unique<IRBuilder<>>(*TheContext);
+    
+    Arrays = std::make_unique<ArrayHandler>(*TheContext, *Builder, *TheModule, NamedValues);
     
     SetupExternalFunctions();
 }
@@ -24,6 +29,8 @@ void CodeGen::SetupExternalFunctions() {
 
     PrintfFormatStr = Builder->CreateGlobalStringPtr("%d\n", "fmt_nl", 0, TheModule.get());
     ScanfFormatStr = Builder->CreateGlobalStringPtr("%d", "fmt_in", 0, TheModule.get());
+    
+    Arrays->setupExternalFunctions();
 }
 
 AllocaInst *CodeGen::CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName) {
@@ -64,7 +71,13 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
             fprintf(stderr, "Error: Unknown variable name %s\n", Var->getName().c_str());
             return nullptr;
         }
+        
         return Builder->CreateLoad(Type::getInt32Ty(*TheContext), A, Var->getName().c_str());
+    }
+    
+
+    if (auto *ArrAcc = dynamic_cast<ArrayAccessExprAST*>(Expr)) {
+        return Arrays->emitArrayAccess(ArrAcc, *this);
     }
 
     if (auto *Bin = dynamic_cast<BinaryExprAST*>(Expr)) {
@@ -234,6 +247,16 @@ void CodeGen::emitForStmt(ForStmtAST *Stmt) {
 void CodeGen::emitStmt(StmtAST *Stmt) {
     if (!Stmt) return;
 
+    if (auto *ArrDecl = dynamic_cast<ArrayDeclareStmtAST*>(Stmt)) {
+        Arrays->emitArrayDeclare(ArrDecl, *this);
+        return;
+    }
+    
+    if (auto *ArrAssign = dynamic_cast<ArrayAssignStmtAST*>(Stmt)) {
+        Arrays->emitArrayAssign(ArrAssign, *this);
+        return;
+    }
+
     if (auto *Decl = dynamic_cast<DeclareStmtAST*>(Stmt)) {
         Function *TheFunction = Builder->GetInsertBlock()->getParent();
         AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Decl->getName());
@@ -261,12 +284,16 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         }
     }
     else if (auto *Out = dynamic_cast<OutputStmtAST*>(Stmt)) {
-        Value *Val = emitExpr(Out->getExpr());
-        if (Val) {
-            std::vector<Value*> Args;
-            Args.push_back(PrintfFormatStr);
-            Args.push_back(Val);
-            Builder->CreateCall(PrintfFunc, Args);
+        bool handled = Arrays->tryEmitArrayOutput(Out->getExpr(), *this, PrintfFunc, PrintfFormatStr);
+        
+        if (!handled) {
+            Value *Val = emitExpr(Out->getExpr());
+            if (Val) {
+                std::vector<Value*> Args;
+                Args.push_back(PrintfFormatStr);
+                Args.push_back(Val);
+                Builder->CreateCall(PrintfFunc, Args);
+            }
         }
     }
     else if (auto *IfStmt = dynamic_cast<IfStmtAST*>(Stmt)) {

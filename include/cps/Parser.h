@@ -29,7 +29,9 @@ class Parser {
     std::unique_ptr<StmtAST> ParseWhileStmt();
     std::unique_ptr<StmtAST> ParseRepeatStmt();
     std::unique_ptr<StmtAST> ParseForStmt();
-
+    
+    std::unique_ptr<StmtAST> ParseDeclare();
+    
 public:
     Parser(Lexer &L);
     std::vector<std::unique_ptr<StmtAST>> Parse();

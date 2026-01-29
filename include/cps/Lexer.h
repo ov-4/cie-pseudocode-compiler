@@ -1,39 +1,46 @@
 #pragma once
 #include <string>
-#include <iostream>
 
 namespace cps {
 
 enum Token {
     tok_eof = -1,
+
     tok_declare = -2,
-    tok_integer_kw = -3, // INTEGER
+    tok_integer_kw = -3,
     tok_input = -4,
     tok_output = -5,
-    tok_identifier = -6,
-    tok_number = -7,
-    tok_assign = -8,     // <-
-    tok_colon = -9,      // :
-
-    tok_if = -10,
-    tok_then = -11,
-    tok_else = -12,
-    tok_endif = -13,
     
-    tok_while = -14,
-    tok_do = -15,
-    tok_endwhile = -16,
-    tok_repeat = -17,
-    tok_until = -18,
-    tok_for = -19,
-    tok_to = -24,
-    tok_step = -25,
-    tok_next = -26,
+    tok_if = -6,
+    tok_then = -7,
+    tok_else = -8,
+    tok_endif = -9,
+    
+    tok_while = -10,
+    tok_do = -11,
+    tok_endwhile = -12,
+    
+    tok_repeat = -13,
+    tok_until = -14,
+    
+    tok_for = -15,
+    tok_to = -16,
+    tok_step = -17,
+    tok_next = -18,
 
-    tok_eq = -20, // =
-    tok_ne = -21, // <>
-    tok_le = -22, // <=
-    tok_ge = -23  // >=
+    tok_array = -19,
+    tok_of = -20,
+
+    tok_identifier = -100,
+    tok_number = -101,
+    
+    tok_assign = -200, // <-
+    tok_eq = -201, // =
+    tok_ne = -202, // <>
+    tok_le = -203, // <=
+    tok_ge = -204, // >=
+    
+    tok_colon = -300 // :
 };
 
 class Lexer {
@@ -44,4 +51,4 @@ public:
     int gettok();
 };
 
-} // namespace cps
+}

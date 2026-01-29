@@ -39,6 +39,9 @@ int Lexer::gettok() {
         if (IdentifierStr == "STEP") return tok_step;
         if (IdentifierStr == "NEXT") return tok_next;
 
+        if (IdentifierStr == "ARRAY") return tok_array;
+        if (IdentifierStr == "OF") return tok_of;
+
         return tok_identifier;
     }
 

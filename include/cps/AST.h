@@ -24,6 +24,16 @@ public:
     const std::string &getName() const { return Name; }
 };
 
+class ArrayAccessExprAST : public ExprAST {
+    std::string Name;
+    std::vector<std::unique_ptr<ExprAST>> Indices;
+public:
+    ArrayAccessExprAST(const std::string &Name, std::vector<std::unique_ptr<ExprAST>> Indices)
+        : Name(Name), Indices(std::move(Indices)) {}
+    const std::string &getName() const { return Name; }
+    const std::vector<std::unique_ptr<ExprAST>> &getIndices() const { return Indices; }
+};
+
 class BinaryExprAST : public ExprAST {
     int Op;
     std::unique_ptr<ExprAST> LHS, RHS;
@@ -47,6 +57,21 @@ public:
     const std::string &getName() const { return Name; }
 };
 
+class ArrayDeclareStmtAST : public StmtAST {
+    std::string Name;
+    std::vector<std::pair<std::unique_ptr<ExprAST>, std::unique_ptr<ExprAST>>> Bounds; 
+    std::string Type;
+public:
+    ArrayDeclareStmtAST(const std::string &Name, 
+        std::vector<std::pair<std::unique_ptr<ExprAST>, std::unique_ptr<ExprAST>>> Bounds,
+        const std::string &Type)
+        : Name(Name), Bounds(std::move(Bounds)), Type(Type) {}
+    
+    const std::string &getName() const { return Name; }
+    const std::vector<std::pair<std::unique_ptr<ExprAST>, std::unique_ptr<ExprAST>>> &getBounds() const { return Bounds; }
+    const std::string &getType() const { return Type; }
+};
+
 class AssignStmtAST : public StmtAST {
     std::string Name;
     std::unique_ptr<ExprAST> Expr;
@@ -54,6 +79,18 @@ public:
     AssignStmtAST(const std::string &Name, std::unique_ptr<ExprAST> Expr)
         : Name(Name), Expr(std::move(Expr)) {}
     const std::string &getName() const { return Name; }
+    ExprAST *getExpr() const { return Expr.get(); }
+};
+
+class ArrayAssignStmtAST : public StmtAST {
+    std::string Name;
+    std::vector<std::unique_ptr<ExprAST>> Indices;
+    std::unique_ptr<ExprAST> Expr;
+public:
+    ArrayAssignStmtAST(const std::string &Name, std::vector<std::unique_ptr<ExprAST>> Indices, std::unique_ptr<ExprAST> Expr)
+        : Name(Name), Indices(std::move(Indices)), Expr(std::move(Expr)) {}
+    const std::string &getName() const { return Name; }
+    const std::vector<std::unique_ptr<ExprAST>> &getIndices() const { return Indices; }
     ExprAST *getExpr() const { return Expr.get(); }
 };
 
