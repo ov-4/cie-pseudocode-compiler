@@ -1,6 +1,8 @@
 #include "cps/Lexer.h"
 #include <cctype>
 #include <cstdio>
+#include <string>
+#include <algorithm>
 
 using namespace cps;
 
@@ -19,10 +21,24 @@ int Lexer::gettok() {
         if (IdentifierStr == "INTEGER") return tok_integer_kw;
         if (IdentifierStr == "INPUT") return tok_input;
         if (IdentifierStr == "OUTPUT") return tok_output;
+        
         if (IdentifierStr == "IF") return tok_if;
         if (IdentifierStr == "THEN") return tok_then;
         if (IdentifierStr == "ELSE") return tok_else;
         if (IdentifierStr == "ENDIF") return tok_endif;
+
+        if (IdentifierStr == "WHILE") return tok_while;
+        if (IdentifierStr == "DO") return tok_do;
+        if (IdentifierStr == "ENDWHILE") return tok_endwhile;
+        
+        if (IdentifierStr == "REPEAT") return tok_repeat;
+        if (IdentifierStr == "UNTIL") return tok_until;
+        
+        if (IdentifierStr == "FOR") return tok_for;
+        if (IdentifierStr == "TO") return tok_to;
+        if (IdentifierStr == "STEP") return tok_step;
+        if (IdentifierStr == "NEXT") return tok_next;
+
         return tok_identifier;
     }
 
@@ -67,6 +83,11 @@ int Lexer::gettok() {
         return tok_eq;
     }
 
+    if (LastChar == ':') {
+        LastChar = getchar();
+        return tok_colon;
+    }
+
     if (LastChar == '/') {
         int NextChar = getchar();
         if (NextChar == '/') {
@@ -80,11 +101,6 @@ int Lexer::gettok() {
             LastChar = NextChar;
             return '/';
         }
-    }
-    
-    if (LastChar == ':') {
-        LastChar = getchar();
-        return tok_colon;
     }
 
     if (LastChar == EOF)

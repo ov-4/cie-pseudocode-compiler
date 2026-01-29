@@ -20,6 +20,16 @@ enum Token {
     tok_else = -12,
     tok_endif = -13,
     
+    tok_while = -14,
+    tok_do = -15,
+    tok_endwhile = -16,
+    tok_repeat = -17,
+    tok_until = -18,
+    tok_for = -19,
+    tok_to = -24,
+    tok_step = -25,
+    tok_next = -26,
+
     tok_eq = -20, // =
     tok_ne = -21, // <>
     tok_le = -22, // <=

@@ -20,10 +20,14 @@ class CodeGen {
     llvm::FunctionCallee ScanfFunc;
     llvm::Value *PrintfFormatStr;
     llvm::Value *ScanfFormatStr;
+    
     llvm::Value *emitExpr(ExprAST *Expr);
     void emitStmt(StmtAST *Stmt);
-    void emitIfStmt(IfStmtAST *Stmt);
     
+    void emitIfStmt(IfStmtAST *Stmt);
+    void emitWhileStmt(WhileStmtAST *Stmt);
+    void emitRepeatStmt(RepeatStmtAST *Stmt);
+    void emitForStmt(ForStmtAST *Stmt);
 
     void SetupExternalFunctions();
 

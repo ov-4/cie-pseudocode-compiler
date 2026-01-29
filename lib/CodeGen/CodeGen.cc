@@ -14,17 +14,14 @@ CodeGen::CodeGen() {
 }
 
 void CodeGen::SetupExternalFunctions() {
-    // printf(i8*, ...)
     std::vector<Type*> PrintfArgs;
     PrintfArgs.push_back(PointerType::getUnqual(*TheContext));
     FunctionType *PrintfType = FunctionType::get(Type::getInt32Ty(*TheContext), PrintfArgs, true);
     PrintfFunc = TheModule->getOrInsertFunction("printf", PrintfType);
 
-    // scanf(i8*, ...)
     FunctionType *ScanfType = FunctionType::get(Type::getInt32Ty(*TheContext), PrintfArgs, true);
     ScanfFunc = TheModule->getOrInsertFunction("scanf", ScanfType);
 
-    // format %d\n and %d
     PrintfFormatStr = Builder->CreateGlobalStringPtr("%d\n", "fmt_nl", 0, TheModule.get());
     ScanfFormatStr = Builder->CreateGlobalStringPtr("%d", "fmt_in", 0, TheModule.get());
 }
@@ -44,7 +41,6 @@ void CodeGen::compile(const std::vector<std::unique_ptr<StmtAST>> &Statements) {
         emitStmt(Stmt.get());
     }
 
-    // main return 0
     if (!Builder->GetInsertBlock()->getTerminator())
         Builder->CreateRet(ConstantInt::get(*TheContext, APInt(32, 0)));
         
@@ -92,7 +88,6 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
             return nullptr;
         }
     }
-
     return nullptr;
 }
 
@@ -100,12 +95,10 @@ void CodeGen::emitIfStmt(IfStmtAST *Stmt) {
     Value *CondV = emitExpr(Stmt->getCond());
     if (!CondV) return;
 
-    if (CondV->getType()->isIntegerTy(32)) {
+    if (CondV->getType()->isIntegerTy(32))
         CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(32, 0)), "ifcond");
-    }
 
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
-
     BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
     BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else", TheFunction);
     BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont", TheFunction);
@@ -113,35 +106,140 @@ void CodeGen::emitIfStmt(IfStmtAST *Stmt) {
     Builder->CreateCondBr(CondV, ThenBB, ElseBB);
 
     Builder->SetInsertPoint(ThenBB);
-    for (const auto &S : Stmt->getThenStmts()) {
-        emitStmt(S.get());
-    }
-    if (!Builder->GetInsertBlock()->getTerminator())
-        Builder->CreateBr(MergeBB);
+    for (const auto &S : Stmt->getThenStmts()) emitStmt(S.get());
+    if (!Builder->GetInsertBlock()->getTerminator()) Builder->CreateBr(MergeBB);
 
     Builder->SetInsertPoint(ElseBB);
-    
-    for (const auto &S : Stmt->getElseStmts()) {
-        emitStmt(S.get());
-    }
-    if (!Builder->GetInsertBlock()->getTerminator())
-        Builder->CreateBr(MergeBB);
+    for (const auto &S : Stmt->getElseStmts()) emitStmt(S.get());
+    if (!Builder->GetInsertBlock()->getTerminator()) Builder->CreateBr(MergeBB);
 
     Builder->SetInsertPoint(MergeBB);
 }
 
+void CodeGen::emitWhileStmt(WhileStmtAST *Stmt) {
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    
+    BasicBlock *CondBB = BasicBlock::Create(*TheContext, "whilecond", TheFunction);
+    BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "whileloop", TheFunction);
+    BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "whilecont", TheFunction);
+
+    Builder->CreateBr(CondBB);
+
+    Builder->SetInsertPoint(CondBB);
+    Value *CondV = emitExpr(Stmt->getCond());
+    if (!CondV) return;
+    if (CondV->getType()->isIntegerTy(32))
+        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(32, 0)), "loopcond");
+    
+    Builder->CreateCondBr(CondV, LoopBB, AfterBB);
+
+    Builder->SetInsertPoint(LoopBB);
+    for (const auto &S : Stmt->getBody()) emitStmt(S.get());
+    
+    if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(CondBB);
+
+    Builder->SetInsertPoint(AfterBB);
+}
+
+void CodeGen::emitRepeatStmt(RepeatStmtAST *Stmt) {
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+    BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "repeatloop", TheFunction);
+    BasicBlock *CondBB = BasicBlock::Create(*TheContext, "repeatcond", TheFunction);
+    BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "repeatcont", TheFunction);
+
+    Builder->CreateBr(LoopBB);
+
+    Builder->SetInsertPoint(LoopBB);
+    for (const auto &S : Stmt->getBody()) emitStmt(S.get());
+    if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(CondBB);
+
+    Builder->SetInsertPoint(CondBB);
+    Value *CondV = emitExpr(Stmt->getCond());
+    if (!CondV) return;
+    
+    if (CondV->getType()->isIntegerTy(32))
+        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(32, 0)), "untilcond");
+
+    Builder->CreateCondBr(CondV, AfterBB, LoopBB);
+
+    Builder->SetInsertPoint(AfterBB);
+}
+
+void CodeGen::emitForStmt(ForStmtAST *Stmt) {
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    std::string VarName = Stmt->getVarName();
+    
+    Value *StartVal = emitExpr(Stmt->getStart());
+    if (!StartVal) return;
+
+    AllocaInst *Alloca = NamedValues[VarName];
+    if (!Alloca) {
+        fprintf(stderr, "Error: Unknown variable in FOR loop %s\n", VarName.c_str());
+        return;
+    }
+    Builder->CreateStore(StartVal, Alloca);
+
+    BasicBlock *CondBB = BasicBlock::Create(*TheContext, "forcond", TheFunction);
+    BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "forloop", TheFunction);
+    BasicBlock *IncBB = BasicBlock::Create(*TheContext, "forinc", TheFunction);
+    BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "forcont", TheFunction);
+
+    Builder->CreateBr(CondBB);
+    Builder->SetInsertPoint(CondBB);
+
+    Value *CurVar = Builder->CreateLoad(Type::getInt32Ty(*TheContext), Alloca, VarName.c_str());
+    Value *EndVal = emitExpr(Stmt->getEnd());
+    if (!EndVal) return;
+
+    bool isNegativeStep = false;
+    if (Stmt->getStep()) {
+        if (auto *Num = dynamic_cast<NumberExprAST*>(Stmt->getStep())) {
+            if (Num->getVal() < 0) isNegativeStep = true;
+        }
+    }
+
+    Value *CondV;
+    if (isNegativeStep) {
+        CondV = Builder->CreateICmpSGE(CurVar, EndVal, "forcond_ge");
+    } else {
+        CondV = Builder->CreateICmpSLE(CurVar, EndVal, "forcond_le");
+    }
+
+    Builder->CreateCondBr(CondV, LoopBB, AfterBB);
+
+    Builder->SetInsertPoint(LoopBB);
+    for (const auto &S : Stmt->getBody()) emitStmt(S.get());
+    if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(IncBB);
+
+    Builder->SetInsertPoint(IncBB);
+    Value *StepVal;
+    if (Stmt->getStep()) {
+        StepVal = emitExpr(Stmt->getStep());
+    } else {
+        StepVal = ConstantInt::get(*TheContext, APInt(32, 1));
+    }
+    
+    Value *CurValForInc = Builder->CreateLoad(Type::getInt32Ty(*TheContext), Alloca, VarName.c_str());
+    Value *NextVal = Builder->CreateAdd(CurValForInc, StepVal, "nextval");
+    Builder->CreateStore(NextVal, Alloca);
+    Builder->CreateBr(CondBB);
+
+    Builder->SetInsertPoint(AfterBB);
+}
 
 void CodeGen::emitStmt(StmtAST *Stmt) {
     if (!Stmt) return;
 
-    // DECLARE
     if (auto *Decl = dynamic_cast<DeclareStmtAST*>(Stmt)) {
         Function *TheFunction = Builder->GetInsertBlock()->getParent();
         AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Decl->getName());
         NamedValues[Decl->getName()] = Alloca;
         Builder->CreateStore(ConstantInt::get(*TheContext, APInt(32, 0)), Alloca);
     }
-    // ASSIGNMENT
     else if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt)) {
         Value *Val = emitExpr(Assign->getExpr());
         if (Val) {
@@ -153,7 +251,6 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
             Builder->CreateStore(Val, Alloca);
         }
     }
-    // INPUT
     else if (auto *In = dynamic_cast<InputStmtAST*>(Stmt)) {
         AllocaInst *Alloca = NamedValues[In->getName()];
         if (Alloca) {
@@ -163,7 +260,6 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
             Builder->CreateCall(ScanfFunc, Args);
         }
     }
-    // OUTPUT
     else if (auto *Out = dynamic_cast<OutputStmtAST*>(Stmt)) {
         Value *Val = emitExpr(Out->getExpr());
         if (Val) {
@@ -173,8 +269,16 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
             Builder->CreateCall(PrintfFunc, Args);
         }
     }
-    // IF
     else if (auto *IfStmt = dynamic_cast<IfStmtAST*>(Stmt)) {
         emitIfStmt(IfStmt);
+    }
+    else if (auto *WhileStmt = dynamic_cast<WhileStmtAST*>(Stmt)) {
+        emitWhileStmt(WhileStmt);
+    }
+    else if (auto *RepeatStmt = dynamic_cast<RepeatStmtAST*>(Stmt)) {
+        emitRepeatStmt(RepeatStmt);
+    }
+    else if (auto *ForStmt = dynamic_cast<ForStmtAST*>(Stmt)) {
+        emitForStmt(ForStmt);
     }
 }

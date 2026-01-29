@@ -24,6 +24,17 @@ public:
     const std::string &getName() const { return Name; }
 };
 
+class BinaryExprAST : public ExprAST {
+    int Op;
+    std::unique_ptr<ExprAST> LHS, RHS;
+public:
+    BinaryExprAST(int Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
+        : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+    int getOp() const { return Op; }
+    ExprAST *getLHS() const { return LHS.get(); }
+    ExprAST *getRHS() const { return RHS.get(); }
+};
+
 class StmtAST {
 public:
     virtual ~StmtAST() = default;
@@ -60,17 +71,6 @@ public:
     ExprAST *getExpr() const { return Expr.get(); }
 };
 
-class BinaryExprAST : public ExprAST {
-    int Op;
-    std::unique_ptr<ExprAST> LHS, RHS;
-public:
-    BinaryExprAST(int Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
-        : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
-    int getOp() const { return Op; }
-    ExprAST *getLHS() const { return LHS.get(); }
-    ExprAST *getRHS() const { return RHS.get(); }
-};
-
 class IfStmtAST : public StmtAST {
     std::unique_ptr<ExprAST> Cond;
     std::vector<std::unique_ptr<StmtAST>> ThenStmts;
@@ -86,5 +86,43 @@ public:
     const std::vector<std::unique_ptr<StmtAST>> &getElseStmts() const { return ElseStmts; }
 };
 
+class WhileStmtAST : public StmtAST {
+    std::unique_ptr<ExprAST> Cond;
+    std::vector<std::unique_ptr<StmtAST>> Body;
+public:
+    WhileStmtAST(std::unique_ptr<ExprAST> Cond, std::vector<std::unique_ptr<StmtAST>> Body)
+        : Cond(std::move(Cond)), Body(std::move(Body)) {}
+    ExprAST *getCond() const { return Cond.get(); }
+    const std::vector<std::unique_ptr<StmtAST>> &getBody() const { return Body; }
+};
+
+class RepeatStmtAST : public StmtAST {
+    std::vector<std::unique_ptr<StmtAST>> Body;
+    std::unique_ptr<ExprAST> Cond;
+public:
+    RepeatStmtAST(std::vector<std::unique_ptr<StmtAST>> Body, std::unique_ptr<ExprAST> Cond)
+        : Body(std::move(Body)), Cond(std::move(Cond)) {}
+    ExprAST *getCond() const { return Cond.get(); }
+    const std::vector<std::unique_ptr<StmtAST>> &getBody() const { return Body; }
+};
+
+class ForStmtAST : public StmtAST {
+    std::string VarName;
+    std::unique_ptr<ExprAST> Start;
+    std::unique_ptr<ExprAST> End;
+    std::unique_ptr<ExprAST> Step;
+    std::vector<std::unique_ptr<StmtAST>> Body;
+public:
+    ForStmtAST(const std::string &VarName, std::unique_ptr<ExprAST> Start, 
+               std::unique_ptr<ExprAST> End, std::unique_ptr<ExprAST> Step,
+               std::vector<std::unique_ptr<StmtAST>> Body)
+        : VarName(VarName), Start(std::move(Start)), End(std::move(End)), 
+          Step(std::move(Step)), Body(std::move(Body)) {}
+    const std::string &getVarName() const { return VarName; }
+    ExprAST *getStart() const { return Start.get(); }
+    ExprAST *getEnd() const { return End.get(); }
+    ExprAST *getStep() const { return Step.get(); }
+    const std::vector<std::unique_ptr<StmtAST>> &getBody() const { return Body; }
+};
 
 } // namespace cps
