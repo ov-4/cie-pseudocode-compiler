@@ -67,7 +67,20 @@ int Lexer::gettok() {
         return tok_eq;
     }
 
-    // for comments
+    if (LastChar == '/') {
+        int NextChar = getchar();
+        if (NextChar == '/') {
+            do {
+                LastChar = getchar();
+            } while (LastChar != EOF && LastChar != '\n' && LastChar != '\r');
+            
+            if (LastChar != EOF)
+                return gettok();
+        } else {
+            LastChar = NextChar;
+            return '/';
+        }
+    }
     
     if (LastChar == ':') {
         LastChar = getchar();
