@@ -19,6 +19,10 @@ int Lexer::gettok() {
         if (IdentifierStr == "INTEGER") return tok_integer_kw;
         if (IdentifierStr == "INPUT") return tok_input;
         if (IdentifierStr == "OUTPUT") return tok_output;
+        if (IdentifierStr == "IF") return tok_if;
+        if (IdentifierStr == "THEN") return tok_then;
+        if (IdentifierStr == "ELSE") return tok_else;
+        if (IdentifierStr == "ENDIF") return tok_endif;
         return tok_identifier;
     }
 
@@ -34,11 +38,33 @@ int Lexer::gettok() {
 
     if (LastChar == '<') {
         LastChar = getchar();
-        if (LastChar == '-') {
+        if (LastChar == '-') { // <-
             LastChar = getchar();
             return tok_assign;
         }
+        if (LastChar == '=') { // <=
+            LastChar = getchar();
+            return tok_le;
+        }
+        if (LastChar == '>') { // <>
+            LastChar = getchar();
+            return tok_ne;
+        }
         return '<';
+    }
+
+    if (LastChar == '>') {
+        LastChar = getchar();
+        if (LastChar == '=') { // >=
+            LastChar = getchar();
+            return tok_ge;
+        }
+        return '>';
+    }
+
+    if (LastChar == '=') {
+        LastChar = getchar();
+        return tok_eq;
     }
 
     // for comments

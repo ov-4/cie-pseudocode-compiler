@@ -1,5 +1,6 @@
 #include "cps/CodeGen.h"
 #include "llvm/IR/Verifier.h"
+#include "cps/Lexer.h"
 
 using namespace llvm;
 using namespace cps;
@@ -40,47 +41,13 @@ void CodeGen::compile(const std::vector<std::unique_ptr<StmtAST>> &Statements) {
     Builder->SetInsertPoint(BB);
 
     for (const auto &Stmt : Statements) {
-        // DECLARE 
-        if (auto *Decl = dynamic_cast<DeclareStmtAST*>(Stmt.get())) {
-            AllocaInst *Alloca = CreateEntryBlockAlloca(F, Decl->getName());
-            NamedValues[Decl->getName()] = Alloca;
-            // 0
-            Builder->CreateStore(ConstantInt::get(*TheContext, APInt(32, 0)), Alloca);
-        }
-        // ASSIGNMENT (x <- expr) 
-        else if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt.get())) {
-            Value *Val = emitExpr(Assign->getExpr());
-            if (Val) {
-                AllocaInst *Alloca = NamedValues[Assign->getName()];
-                if (Alloca) Builder->CreateStore(Val, Alloca);
-            }
-        }
-        // INPUT 
-        else if (auto *In = dynamic_cast<InputStmtAST*>(Stmt.get())) {
-            AllocaInst *Alloca = NamedValues[In->getName()];
-            if (Alloca) {
-                std::vector<Value*> Args;
-                Args.push_back(ScanfFormatStr);
-                Args.push_back(Alloca);
-                Builder->CreateCall(ScanfFunc, Args);
-            }
-        }
-        // OUTPUT
-        else if (auto *Out = dynamic_cast<OutputStmtAST*>(Stmt.get())) {
-            Value *Val = emitExpr(Out->getExpr());
-
-            if (Val) {
-                // printf("%d\n", val)
-                std::vector<Value*> Args;
-                Args.push_back(PrintfFormatStr);
-                Args.push_back(Val);
-                Builder->CreateCall(PrintfFunc, Args);
-            }
-        }
+        emitStmt(Stmt.get());
     }
 
     // main return 0
-    Builder->CreateRet(ConstantInt::get(*TheContext, APInt(32, 0)));
+    if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateRet(ConstantInt::get(*TheContext, APInt(32, 0)));
+        
     verifyFunction(*F);
 }
 
@@ -114,6 +81,12 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         case '-': return Builder->CreateSub(L, R, "subtmp");
         case '*': return Builder->CreateMul(L, R, "multmp");
         case '/': return Builder->CreateSDiv(L, R, "divtmp");
+        case tok_eq: return Builder->CreateICmpEQ(L, R, "eqtmp");
+        case tok_ne: return Builder->CreateICmpNE(L, R, "netmp");
+        case '<':    return Builder->CreateICmpSLT(L, R, "slttmp");
+        case '>':    return Builder->CreateICmpSGT(L, R, "sgttmp");
+        case tok_le: return Builder->CreateICmpSLE(L, R, "sletmp");
+        case tok_ge: return Builder->CreateICmpSGE(L, R, "sgetmp");
         default:  
             fprintf(stderr, "Error: Invalid binary operator\n");
             return nullptr;
@@ -121,4 +94,87 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
     }
 
     return nullptr;
+}
+
+void CodeGen::emitIfStmt(IfStmtAST *Stmt) {
+    Value *CondV = emitExpr(Stmt->getCond());
+    if (!CondV) return;
+
+    if (CondV->getType()->isIntegerTy(32)) {
+        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(32, 0)), "ifcond");
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+    BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
+    BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else", TheFunction);
+    BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont", TheFunction);
+
+    Builder->CreateCondBr(CondV, ThenBB, ElseBB);
+
+    Builder->SetInsertPoint(ThenBB);
+    for (const auto &S : Stmt->getThenStmts()) {
+        emitStmt(S.get());
+    }
+    if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+
+    Builder->SetInsertPoint(ElseBB);
+    
+    for (const auto &S : Stmt->getElseStmts()) {
+        emitStmt(S.get());
+    }
+    if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+
+    Builder->SetInsertPoint(MergeBB);
+}
+
+
+void CodeGen::emitStmt(StmtAST *Stmt) {
+    if (!Stmt) return;
+
+    // DECLARE
+    if (auto *Decl = dynamic_cast<DeclareStmtAST*>(Stmt)) {
+        Function *TheFunction = Builder->GetInsertBlock()->getParent();
+        AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Decl->getName());
+        NamedValues[Decl->getName()] = Alloca;
+        Builder->CreateStore(ConstantInt::get(*TheContext, APInt(32, 0)), Alloca);
+    }
+    // ASSIGNMENT
+    else if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt)) {
+        Value *Val = emitExpr(Assign->getExpr());
+        if (Val) {
+            AllocaInst *Alloca = NamedValues[Assign->getName()];
+            if (!Alloca) {
+                fprintf(stderr, "Error: Unknown variable name %s\n", Assign->getName().c_str());
+                return;
+            }
+            Builder->CreateStore(Val, Alloca);
+        }
+    }
+    // INPUT
+    else if (auto *In = dynamic_cast<InputStmtAST*>(Stmt)) {
+        AllocaInst *Alloca = NamedValues[In->getName()];
+        if (Alloca) {
+            std::vector<Value*> Args;
+            Args.push_back(ScanfFormatStr);
+            Args.push_back(Alloca); 
+            Builder->CreateCall(ScanfFunc, Args);
+        }
+    }
+    // OUTPUT
+    else if (auto *Out = dynamic_cast<OutputStmtAST*>(Stmt)) {
+        Value *Val = emitExpr(Out->getExpr());
+        if (Val) {
+            std::vector<Value*> Args;
+            Args.push_back(PrintfFormatStr);
+            Args.push_back(Val);
+            Builder->CreateCall(PrintfFunc, Args);
+        }
+    }
+    // IF
+    else if (auto *IfStmt = dynamic_cast<IfStmtAST*>(Stmt)) {
+        emitIfStmt(IfStmt);
+    }
 }

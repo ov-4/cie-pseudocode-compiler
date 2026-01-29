@@ -21,6 +21,9 @@ class CodeGen {
     llvm::Value *PrintfFormatStr;
     llvm::Value *ScanfFormatStr;
     llvm::Value *emitExpr(ExprAST *Expr);
+    void emitStmt(StmtAST *Stmt);
+    void emitIfStmt(IfStmtAST *Stmt);
+    
 
     void SetupExternalFunctions();
 

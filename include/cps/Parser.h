@@ -24,6 +24,9 @@ class Parser {
     std::unique_ptr<ExprAST> ParseIdentifierExpr();
     std::unique_ptr<ExprAST> ParseParenExpr();
 
+    std::unique_ptr<StmtAST> ParseStatement();
+    std::unique_ptr<StmtAST> ParseIfStmt();
+
 public:
     Parser(Lexer &L);
     std::vector<std::unique_ptr<StmtAST>> Parse();

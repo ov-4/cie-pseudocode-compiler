@@ -61,12 +61,37 @@ public:
 };
 
 class BinaryExprAST : public ExprAST {
-    char Op; // '+', '-', '*', '/'
+    int Op;
+    std::unique_ptr<ExprAST> LHS, RHS;
+public:
+    BinaryExprAST(int Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
+        : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+    int getOp() const { return Op; }
+    ExprAST *getLHS() const { return LHS.get(); }
+    ExprAST *getRHS() const { return RHS.get(); }
+};
+
+class IfStmtAST : public StmtAST {
+    std::unique_ptr<ExprAST> Cond;
+    std::vector<std::unique_ptr<StmtAST>> ThenStmts;
+    std::vector<std::unique_ptr<StmtAST>> ElseStmts;
+public:
+    IfStmtAST(std::unique_ptr<ExprAST> Cond,
+              std::vector<std::unique_ptr<StmtAST>> ThenStmts,
+              std::vector<std::unique_ptr<StmtAST>> ElseStmts)
+        : Cond(std::move(Cond)), ThenStmts(std::move(ThenStmts)), ElseStmts(std::move(ElseStmts)) {}
+
+    ExprAST *getCond() const { return Cond.get(); }
+    const std::vector<std::unique_ptr<StmtAST>> &getThenStmts() const { return ThenStmts; }
+    const std::vector<std::unique_ptr<StmtAST>> &getElseStmts() const { return ElseStmts; }
+};
+
+class BinaryExprAST : public ExprAST {
+    char Op;
     std::unique_ptr<ExprAST> LHS, RHS;
 public:
     BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
         : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
-
     char getOp() const { return Op; }
     ExprAST *getLHS() const { return LHS.get(); }
     ExprAST *getRHS() const { return RHS.get(); }
