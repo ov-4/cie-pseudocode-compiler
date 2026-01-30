@@ -29,15 +29,15 @@ void CodeGen::SetupExternalFunctions() {
     FunctionType *ScanfType = FunctionType::get(Type::getInt32Ty(*TheContext), PrintfArgs, true);
     ScanfFunc = TheModule->getOrInsertFunction("scanf", ScanfType);
 
-    PrintfFormatStr = Builder->CreateGlobalStringPtr("%d\n", "fmt_nl", 0, TheModule.get());
-    ScanfFormatStr = Builder->CreateGlobalStringPtr("%d", "fmt_in", 0, TheModule.get());
+    PrintfFormatStr = Builder->CreateGlobalStringPtr("%lld\n", "fmt_nl", 0, TheModule.get());
+    ScanfFormatStr = Builder->CreateGlobalStringPtr("%lld", "fmt_in", 0, TheModule.get());
     
     Arrays->setupExternalFunctions();
 }
 
 AllocaInst *CodeGen::CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName) {
     IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
-    return TmpB.CreateAlloca(Type::getInt32Ty(*TheContext), nullptr, VarName);
+    return TmpB.CreateAlloca(Type::getInt64Ty(*TheContext), nullptr, VarName);
 }
 
 void CodeGen::compile(const std::vector<std::unique_ptr<StmtAST>> &Statements) {
@@ -64,7 +64,7 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
     if (!Expr) return nullptr;
 
     if (auto *Num = dynamic_cast<NumberExprAST*>(Expr)) {
-        return ConstantInt::get(*TheContext, APInt(32, Num->getVal(), true)); 
+        return ConstantInt::get(*TheContext, APInt(64, Num->getVal(), true)); 
     }
     
     if (auto *Var = dynamic_cast<VariableExprAST*>(Expr)) {
@@ -74,7 +74,7 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
             return nullptr;
         }
         
-        return Builder->CreateLoad(Type::getInt32Ty(*TheContext), A, Var->getName().c_str());
+        return Builder->CreateLoad(Type::getInt64Ty(*TheContext), A, Var->getName().c_str());
     }
     
 
@@ -112,8 +112,8 @@ void CodeGen::emitIfStmt(IfStmtAST *Stmt) {
     Value *CondV = emitExpr(Stmt->getCond());
     if (!CondV) return;
 
-    if (CondV->getType()->isIntegerTy(32))
-        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(32, 0)), "ifcond");
+    if (CondV->getType()->isIntegerTy(64))
+        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "ifcond");
 
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
     BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
@@ -145,8 +145,8 @@ void CodeGen::emitWhileStmt(WhileStmtAST *Stmt) {
     Builder->SetInsertPoint(CondBB);
     Value *CondV = emitExpr(Stmt->getCond());
     if (!CondV) return;
-    if (CondV->getType()->isIntegerTy(32))
-        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(32, 0)), "loopcond");
+    if (CondV->getType()->isIntegerTy(64))
+        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "loopcond");
     
     Builder->CreateCondBr(CondV, LoopBB, AfterBB);
 
@@ -177,8 +177,8 @@ void CodeGen::emitRepeatStmt(RepeatStmtAST *Stmt) {
     Value *CondV = emitExpr(Stmt->getCond());
     if (!CondV) return;
     
-    if (CondV->getType()->isIntegerTy(32))
-        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(32, 0)), "untilcond");
+    if (CondV->getType()->isIntegerTy(64))
+        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "untilcond");
 
     Builder->CreateCondBr(CondV, AfterBB, LoopBB);
 
@@ -207,7 +207,7 @@ void CodeGen::emitForStmt(ForStmtAST *Stmt) {
     Builder->CreateBr(CondBB);
     Builder->SetInsertPoint(CondBB);
 
-    Value *CurVar = Builder->CreateLoad(Type::getInt32Ty(*TheContext), Alloca, VarName.c_str());
+    Value *CurVar = Builder->CreateLoad(Type::getInt64Ty(*TheContext), Alloca, VarName.c_str());
     Value *EndVal = emitExpr(Stmt->getEnd());
     if (!EndVal) return;
 
@@ -237,10 +237,10 @@ void CodeGen::emitForStmt(ForStmtAST *Stmt) {
     if (Stmt->getStep()) {
         StepVal = emitExpr(Stmt->getStep());
     } else {
-        StepVal = ConstantInt::get(*TheContext, APInt(32, 1));
+        StepVal = ConstantInt::get(*TheContext, APInt(64, 1));
     }
     
-    Value *CurValForInc = Builder->CreateLoad(Type::getInt32Ty(*TheContext), Alloca, VarName.c_str());
+    Value *CurValForInc = Builder->CreateLoad(Type::getInt64Ty(*TheContext), Alloca, VarName.c_str());
     Value *NextVal = Builder->CreateAdd(CurValForInc, StepVal, "nextval");
     Builder->CreateStore(NextVal, Alloca);
     Builder->CreateBr(CondBB);
@@ -265,7 +265,7 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         Function *TheFunction = Builder->GetInsertBlock()->getParent();
         AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Decl->getName());
         NamedValues[Decl->getName()] = Alloca;
-        Builder->CreateStore(ConstantInt::get(*TheContext, APInt(32, 0)), Alloca);
+        Builder->CreateStore(ConstantInt::get(*TheContext, APInt(64, 0)), Alloca);
     }
     else if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt)) {
         Value *Val = emitExpr(Assign->getExpr());
@@ -313,3 +313,4 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         emitForStmt(ForStmt);
     }
 }
+

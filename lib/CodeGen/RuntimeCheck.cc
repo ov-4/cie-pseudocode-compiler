@@ -47,7 +47,7 @@ void RuntimeCheck::emitErrorAndExit(Value *Condition, Value *Msg, int Line) {
 }
 
 void RuntimeCheck::emitDivZeroCheck(Value *Divisor, int Line) {
-    Value *IsZero = Builder.CreateICmpEQ(Divisor, ConstantInt::get(TheContext, APInt(32, 0)), "is_zero");
+    Value *IsZero = Builder.CreateICmpEQ(Divisor, ConstantInt::get(TheContext, APInt(64, 0)), "is_zero");
     emitErrorAndExit(IsZero, DivZeroMsg, Line);
 }
 

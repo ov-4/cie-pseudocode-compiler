@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <cstdint>
 
 namespace cps {
 
@@ -47,7 +48,7 @@ class Lexer {
     int CurrentLine = 1;
 public:
     std::string IdentifierStr;
-    int NumVal;
+    int64_t NumVal;
 
     int gettok();
     int getLine() const { return CurrentLine; }

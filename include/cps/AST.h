@@ -2,6 +2,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <cstdint>
 
 namespace cps {
 
@@ -11,10 +12,10 @@ public:
 };
 
 class NumberExprAST : public ExprAST {
-    int Val;
+    int64_t Val;
 public:
-    NumberExprAST(int Val) : Val(Val) {}
-    int getVal() const { return Val; }
+    NumberExprAST(int64_t Val) : Val(Val) {}
+    int64_t getVal() const { return Val; }
 };
 
 class VariableExprAST : public ExprAST {

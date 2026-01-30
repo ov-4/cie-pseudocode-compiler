@@ -53,25 +53,24 @@ void ArrayHandler::emitArrayDeclare(ArrayDeclareStmtAST *Stmt, CodeGen &CG) {
     }
     
     std::vector<Value*> Multipliers(Rank);
-    Multipliers[Rank - 1] = ConstantInt::get(*TheContext, APInt(32, 1));
+    Multipliers[Rank - 1] = ConstantInt::get(*TheContext, APInt(64, 1));
     
     for (int i = Rank - 2; i >= 0; --i) {
         Value *NextMult = Multipliers[i+1];
         Value *NextDimSize = Dims[i+1];
-        Value *NextDimSize32 = Builder->CreateTrunc(NextDimSize, Type::getInt32Ty(*TheContext));
-        Multipliers[i] = Builder->CreateMul(NextMult, NextDimSize32);
+        Multipliers[i] = Builder->CreateMul(NextMult, NextDimSize);
     }
 
     ArrayMetadata Meta;
     Meta.Rank = Rank;
-    Meta.ElementType = Type::getInt32Ty(*TheContext);
+    Meta.ElementType = Type::getInt64Ty(*TheContext);
     Meta.LowerBounds = Lows;
     Meta.UpperBounds = Highs;
     Meta.Multipliers = Multipliers;
     ArrayTable[Name] = Meta;
     
 
-    Value *ElemSize = ConstantInt::get(*TheContext, APInt(64, 4)); 
+    Value *ElemSize = ConstantInt::get(*TheContext, APInt(64, 8)); 
     Value *TotalBytes = Builder->CreateMul(TotalElements, ElemSize);
     
     CallInst *Ptr = Builder->CreateCall(MallocFunc, TotalBytes);
@@ -89,7 +88,7 @@ Value* ArrayHandler::computeFlatIndex(const std::string &Name, const std::vector
     if (ArrayTable.find(Name) == ArrayTable.end()) return nullptr;
     const auto &Meta = ArrayTable[Name];
     
-    Value *Offset = ConstantInt::get(*TheContext, APInt(32, 0));
+    Value *Offset = ConstantInt::get(*TheContext, APInt(64, 0));
     
     for (size_t i = 0; i < Indices.size(); ++i) {
         Value *Idx = Indices[i];
@@ -129,9 +128,9 @@ Value* ArrayHandler::emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG) {
     AllocaInst *Alloca = (*NamedValues)[Name];
     Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
     Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
-    Value *ElemPtr = Builder->CreateGEP(Type::getInt32Ty(*TheContext), IntPtr, Offset);
+    Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);
     
-    return Builder->CreateLoad(Type::getInt32Ty(*TheContext), ElemPtr);
+    return Builder->CreateLoad(Type::getInt64Ty(*TheContext), ElemPtr);
 }
 
 void ArrayHandler::emitArrayAssign(ArrayAssignStmtAST *Stmt, CodeGen &CG) {
@@ -158,7 +157,7 @@ void ArrayHandler::emitArrayAssign(ArrayAssignStmtAST *Stmt, CodeGen &CG) {
     AllocaInst *Alloca = (*NamedValues)[Name];
     Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
     Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
-    Value *ElemPtr = Builder->CreateGEP(Type::getInt32Ty(*TheContext), IntPtr, Offset);
+    Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);
     
     Builder->CreateStore(Val, ElemPtr);
 }
@@ -201,8 +200,8 @@ void ArrayHandler::emitPrintLoop(const std::string &Name, int CurrentDim, std::v
         AllocaInst *Alloca = (*NamedValues)[Name];
         Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
         Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
-        Value *ElemPtr = Builder->CreateGEP(Type::getInt32Ty(*TheContext), IntPtr, Offset);
-        Value *Val = Builder->CreateLoad(Type::getInt32Ty(*TheContext), ElemPtr);
+        Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);
+        Value *Val = Builder->CreateLoad(Type::getInt64Ty(*TheContext), ElemPtr);
         
         std::vector<Value*> Args;
         Args.push_back(FmtStr);
@@ -216,7 +215,7 @@ void ArrayHandler::emitPrintLoop(const std::string &Name, int CurrentDim, std::v
     BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "arr_after", TheFunction);
     
     IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
-    AllocaInst *LoopVar = TmpB.CreateAlloca(Type::getInt32Ty(*TheContext), nullptr, "idx");
+    AllocaInst *LoopVar = TmpB.CreateAlloca(Type::getInt64Ty(*TheContext), nullptr, "idx");
     
     Value *Start = Meta.LowerBounds[CurrentDim];
     Value *End = Meta.UpperBounds[CurrentDim];
@@ -225,13 +224,13 @@ void ArrayHandler::emitPrintLoop(const std::string &Name, int CurrentDim, std::v
     Builder->CreateBr(LoopBB);
     
     Builder->SetInsertPoint(LoopBB);
-    Value *CurVal = Builder->CreateLoad(Type::getInt32Ty(*TheContext), LoopVar);
+    Value *CurVal = Builder->CreateLoad(Type::getInt64Ty(*TheContext), LoopVar);
     
     std::vector<Value*> NextIndices = CurrentIndices;
     NextIndices.push_back(CurVal);
     emitPrintLoop(Name, CurrentDim + 1, NextIndices, PrintfFunc, FmtStr);
     
-    Value *NextVal = Builder->CreateAdd(CurVal, ConstantInt::get(*TheContext, APInt(32, 1)));
+    Value *NextVal = Builder->CreateAdd(CurVal, ConstantInt::get(*TheContext, APInt(64, 1)));
     Builder->CreateStore(NextVal, LoopVar);
     
     Value *Cond = Builder->CreateICmpSLE(NextVal, End);

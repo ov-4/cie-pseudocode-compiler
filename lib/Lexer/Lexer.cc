@@ -53,7 +53,7 @@ int Lexer::gettok() {
             NumStr += LastChar;
             LastChar = getchar();
         } while (isdigit(LastChar));
-        NumVal = strtol(NumStr.c_str(), nullptr, 10);
+        NumVal = strtoll(NumStr.c_str(), nullptr, 10);
         return tok_number;
     }
 
