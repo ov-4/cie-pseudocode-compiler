@@ -9,8 +9,10 @@ using namespace cps;
 int Lexer::gettok() {
     static int LastChar = ' ';
 
-    while (isspace(LastChar))
+    while (isspace(LastChar)) {
+        if (LastChar == '\n') CurrentLine++;
         LastChar = getchar();
+    }
 
     if (isalpha(LastChar)) {
         IdentifierStr = LastChar;

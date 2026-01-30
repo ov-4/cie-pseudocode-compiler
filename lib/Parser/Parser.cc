@@ -38,6 +38,7 @@ std::unique_ptr<ExprAST> Parser::ParseNumberExpr() {
 
 std::unique_ptr<ExprAST> Parser::ParseIdentifierExpr() {
     std::string IdName = Lex.IdentifierStr;
+    int Line = Lex.getLine();
     getNextToken();
     
     if (CurTok == '[') {
@@ -60,7 +61,7 @@ std::unique_ptr<ExprAST> Parser::ParseIdentifierExpr() {
             return nullptr;
         }
         getNextToken(); 
-        return std::make_unique<ArrayAccessExprAST>(IdName, std::move(Indices));
+        return std::make_unique<ArrayAccessExprAST>(IdName, std::move(Indices), Line);
     }
     
     return std::make_unique<VariableExprAST>(IdName);
@@ -84,7 +85,8 @@ std::unique_ptr<ExprAST> Parser::ParsePrimary() {
     case tok_number:     return ParseNumberExpr();
     case '(':            return ParseParenExpr();
     default:
-        fprintf(stderr, "Error: unknown token when expecting an expression\n");
+        fprintf(stderr, "Error: unknown token '%c' (%d) at line %d when expecting an expression\n", 
+                (char)CurTok, CurTok, Lex.getLine());
         return nullptr;
     }
 }
@@ -95,6 +97,7 @@ std::unique_ptr<ExprAST> Parser::ParseBinOpRHS(int ExprPrec, std::unique_ptr<Exp
         if (TokPrec < ExprPrec) return LHS;
 
         int BinOp = CurTok;
+        int Line = Lex.getLine();
         getNextToken();
 
         auto RHS = ParsePrimary();
@@ -106,7 +109,7 @@ std::unique_ptr<ExprAST> Parser::ParseBinOpRHS(int ExprPrec, std::unique_ptr<Exp
             if (!RHS) return nullptr;
         }
 
-        LHS = std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
+        LHS = std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS), Line);
     }
 }
 
@@ -209,6 +212,7 @@ std::unique_ptr<StmtAST> Parser::ParseIfStmt() {
     while (CurTok != tok_else && CurTok != tok_endif && CurTok != tok_eof) {
         auto Stmt = ParseStatement();
         if (Stmt) ThenStmts.push_back(std::move(Stmt));
+        else if (CurTok != tok_eof && CurTok != tok_else && CurTok != tok_endif) getNextToken();
     }
 
     std::vector<std::unique_ptr<StmtAST>> ElseStmts;
@@ -217,6 +221,7 @@ std::unique_ptr<StmtAST> Parser::ParseIfStmt() {
         while (CurTok != tok_endif && CurTok != tok_eof) {
             auto Stmt = ParseStatement();
             if (Stmt) ElseStmts.push_back(std::move(Stmt));
+            else if (CurTok != tok_eof && CurTok != tok_endif) getNextToken();
         }
     }
 
@@ -244,6 +249,7 @@ std::unique_ptr<StmtAST> Parser::ParseWhileStmt() {
     while (CurTok != tok_endwhile && CurTok != tok_eof) {
         auto Stmt = ParseStatement();
         if (Stmt) Body.push_back(std::move(Stmt));
+        else if (CurTok != tok_eof && CurTok != tok_endwhile) getNextToken();
     }
 
     if (CurTok != tok_endwhile) {
@@ -262,6 +268,7 @@ std::unique_ptr<StmtAST> Parser::ParseRepeatStmt() {
     while (CurTok != tok_until && CurTok != tok_eof) {
         auto Stmt = ParseStatement();
         if (Stmt) Body.push_back(std::move(Stmt));
+        else if (CurTok != tok_eof && CurTok != tok_until) getNextToken();
     }
 
     if (CurTok != tok_until) {
@@ -307,12 +314,14 @@ std::unique_ptr<StmtAST> Parser::ParseForStmt() {
     if (CurTok == tok_step) {
         getNextToken();
         Step = ParseExpression();
+        if (!Step) return nullptr;
     }
 
     std::vector<std::unique_ptr<StmtAST>> Body;
     while (CurTok != tok_next && CurTok != tok_eof) {
         auto Stmt = ParseStatement();
         if (Stmt) Body.push_back(std::move(Stmt));
+        else if (CurTok != tok_eof && CurTok != tok_next) getNextToken();
     }
 
     if (CurTok != tok_next) {
@@ -342,6 +351,7 @@ std::unique_ptr<StmtAST> Parser::ParseStatement() {
     }
     else if (CurTok == tok_identifier) {
         std::string Name = Lex.IdentifierStr;
+        int Line = Lex.getLine();
         getNextToken();
         
         if (CurTok == '[') {
@@ -349,6 +359,7 @@ std::unique_ptr<StmtAST> Parser::ParseStatement() {
             std::vector<std::unique_ptr<ExprAST>> Indices;
             while (true) {
                 auto Exp = ParseExpression();
+                if (!Exp) return nullptr;
                 Indices.push_back(std::move(Exp));
                 if (CurTok == ']') break;
                 if (CurTok == ',') getNextToken();
@@ -361,12 +372,14 @@ std::unique_ptr<StmtAST> Parser::ParseStatement() {
             }
             getNextToken();
             auto Expr = ParseExpression();
-            return std::make_unique<ArrayAssignStmtAST>(Name, std::move(Indices), std::move(Expr));
+            if (!Expr) return nullptr;
+            return std::make_unique<ArrayAssignStmtAST>(Name, std::move(Indices), std::move(Expr), Line);
         }
         
         if (CurTok != tok_assign) return nullptr;
         getNextToken();
         auto Expr = ParseExpression();
+        if (!Expr) return nullptr;
         return std::make_unique<AssignStmtAST>(Name, std::move(Expr));
     }
     else if (CurTok == tok_input) {
@@ -379,6 +392,7 @@ std::unique_ptr<StmtAST> Parser::ParseStatement() {
     else if (CurTok == tok_output) {
         getNextToken();
         auto Expr = ParseExpression();
+        if (!Expr) return nullptr;
         return std::make_unique<OutputStmtAST>(std::move(Expr));
     }
     else if (CurTok == tok_if) {

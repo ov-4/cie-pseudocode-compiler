@@ -3,6 +3,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "cps/AST.h"
+#include "cps/RuntimeCheck.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -26,6 +27,7 @@ class ArrayHandler {
     std::map<std::string, llvm::AllocaInst*> *NamedValues;
 
     std::map<std::string, ArrayMetadata> ArrayTable;
+    RuntimeCheck &RuntimeChecker;
 
     llvm::FunctionCallee MallocFunc;
     llvm::FunctionCallee FreeFunc;
@@ -41,6 +43,7 @@ public:
     
     void emitArrayDeclare(ArrayDeclareStmtAST *Stmt, CodeGen &CG);
     void emitArrayAssign(ArrayAssignStmtAST *Stmt, CodeGen &CG);
+    ArrayHandler(llvm::LLVMContext &C, llvm::IRBuilder<> &B, llvm::Module &M, std::map<std::string, llvm::AllocaInst*> &NV, RuntimeCheck &RC);
     
     llvm::Value* emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG);
 

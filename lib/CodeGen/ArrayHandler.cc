@@ -8,8 +8,8 @@
 using namespace llvm;
 using namespace cps;
 
-ArrayHandler::ArrayHandler(LLVMContext &C, IRBuilder<> &B, Module &M, std::map<std::string, AllocaInst*> &NV)
-    : TheContext(&C), Builder(&B), TheModule(&M), NamedValues(&NV) {
+ArrayHandler::ArrayHandler(LLVMContext &C, IRBuilder<> &B, Module &M, std::map<std::string, AllocaInst*> &NV, RuntimeCheck &RC)
+    : TheContext(&C), Builder(&B), TheModule(&M), NamedValues(&NV), RuntimeChecker(RC) {
     setupExternalFunctions();
 }
 
@@ -115,8 +115,13 @@ Value* ArrayHandler::emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG) {
     }
 
     std::vector<Value*> Indices;
-    for (const auto &IdxExpr : Expr->getIndices()) {
-        Indices.push_back(CG.emitExpr(IdxExpr.get()));
+    for (size_t i = 0; i < Expr->getIndices().size(); ++i) {
+        Value *Idx = CG.emitExpr(Expr->getIndices()[i].get());
+        Indices.push_back(Idx);
+
+        Value *Lower = Meta.LowerBounds[i];
+        Value *Upper = Meta.UpperBounds[i];
+        RuntimeChecker.emitIndexCheck(Idx, Lower, Upper, Expr->getLine());
     }
     
     Value *Offset = computeFlatIndex(Name, Indices);
@@ -137,8 +142,14 @@ void ArrayHandler::emitArrayAssign(ArrayAssignStmtAST *Stmt, CodeGen &CG) {
     }
     
     std::vector<Value*> Indices;
-    for (const auto &IdxExpr : Stmt->getIndices()) {
-        Indices.push_back(CG.emitExpr(IdxExpr.get()));
+    for (size_t i = 0; i < Stmt->getIndices().size(); ++i) {
+        Value *Idx = CG.emitExpr(Stmt->getIndices()[i].get());
+        Indices.push_back(Idx);
+
+        const auto &Meta = ArrayTable[Name];
+        Value *Lower = Meta.LowerBounds[i];
+        Value *Upper = Meta.UpperBounds[i];
+        RuntimeChecker.emitIndexCheck(Idx, Lower, Upper, Stmt->getLine());
     }
     
     Value *Val = CG.emitExpr(Stmt->getExpr());

@@ -14,9 +14,11 @@ include_directories(include)
 
 add_library(CPSLexer lib/Lexer/Lexer.cc)
 add_library(CPSParser lib/Parser/Parser.cc)
+
 add_library(CPSCodeGen
     lib/CodeGen/CodeGen.cc
     lib/CodeGen/ArrayHandler.cc
+    lib/CodeGen/RuntimeCheck.cc
 )
 
 llvm_map_components_to_libnames(llvm_libs core support native irreader)

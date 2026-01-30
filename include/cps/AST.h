@@ -27,22 +27,26 @@ public:
 class ArrayAccessExprAST : public ExprAST {
     std::string Name;
     std::vector<std::unique_ptr<ExprAST>> Indices;
+    int Line;
 public:
-    ArrayAccessExprAST(const std::string &Name, std::vector<std::unique_ptr<ExprAST>> Indices)
-        : Name(Name), Indices(std::move(Indices)) {}
+    ArrayAccessExprAST(const std::string &Name, std::vector<std::unique_ptr<ExprAST>> Indices, int Line)
+        : Name(Name), Indices(std::move(Indices)), Line(Line) {}
     const std::string &getName() const { return Name; }
     const std::vector<std::unique_ptr<ExprAST>> &getIndices() const { return Indices; }
+    int getLine() const { return Line; }
 };
 
 class BinaryExprAST : public ExprAST {
     int Op;
     std::unique_ptr<ExprAST> LHS, RHS;
+    int Line;
 public:
-    BinaryExprAST(int Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
-        : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+    BinaryExprAST(int Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS, int Line)
+        : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)), Line(Line) {}
     int getOp() const { return Op; }
     ExprAST *getLHS() const { return LHS.get(); }
     ExprAST *getRHS() const { return RHS.get(); }
+    int getLine() const { return Line; }
 };
 
 class StmtAST {
@@ -86,12 +90,14 @@ class ArrayAssignStmtAST : public StmtAST {
     std::string Name;
     std::vector<std::unique_ptr<ExprAST>> Indices;
     std::unique_ptr<ExprAST> Expr;
+    int Line;
 public:
-    ArrayAssignStmtAST(const std::string &Name, std::vector<std::unique_ptr<ExprAST>> Indices, std::unique_ptr<ExprAST> Expr)
-        : Name(Name), Indices(std::move(Indices)), Expr(std::move(Expr)) {}
+    ArrayAssignStmtAST(const std::string &Name, std::vector<std::unique_ptr<ExprAST>> Indices, std::unique_ptr<ExprAST> Expr, int Line)
+        : Name(Name), Indices(std::move(Indices)), Expr(std::move(Expr)), Line(Line) {}
     const std::string &getName() const { return Name; }
     const std::vector<std::unique_ptr<ExprAST>> &getIndices() const { return Indices; }
     ExprAST *getExpr() const { return Expr.get(); }
+    int getLine() const { return Line; }
 };
 
 class InputStmtAST : public StmtAST {

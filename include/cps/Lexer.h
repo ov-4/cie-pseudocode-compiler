@@ -44,11 +44,13 @@ enum Token {
 };
 
 class Lexer {
+    int CurrentLine = 1;
 public:
     std::string IdentifierStr;
     int NumVal;
 
     int gettok();
+    int getLine() const { return CurrentLine; }
 };
 
 }

@@ -3,6 +3,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "cps/AST.h"
+#include "cps/RuntimeCheck.h"
 #include <map>
 #include <memory>
 
@@ -17,6 +18,7 @@ class CodeGen {
     std::map<std::string, llvm::AllocaInst*> NamedValues;
     
     std::unique_ptr<ArrayHandler> Arrays;
+    std::unique_ptr<RuntimeCheck> RuntimeChecker;
 
     llvm::FunctionCallee PrintfFunc;
     llvm::FunctionCallee ScanfFunc;

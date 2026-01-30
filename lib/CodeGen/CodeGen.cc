@@ -13,7 +13,9 @@ CodeGen::CodeGen() {
     TheModule = std::make_unique<Module>("cps_module", *TheContext);
     Builder = std::make_unique<IRBuilder<>>(*TheContext);
     
-    Arrays = std::make_unique<ArrayHandler>(*TheContext, *Builder, *TheModule, NamedValues);
+    RuntimeChecker = std::make_unique<RuntimeCheck>(*TheModule, *TheContext, *Builder);
+    
+    Arrays = std::make_unique<ArrayHandler>(*TheContext, *Builder, *TheModule, NamedValues, *RuntimeChecker);
     
     SetupExternalFunctions();
 }
@@ -89,7 +91,9 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         case '+': return Builder->CreateAdd(L, R, "addtmp");
         case '-': return Builder->CreateSub(L, R, "subtmp");
         case '*': return Builder->CreateMul(L, R, "multmp");
-        case '/': return Builder->CreateSDiv(L, R, "divtmp");
+        case '/': 
+            RuntimeChecker->emitDivZeroCheck(R, Bin->getLine());
+            return Builder->CreateSDiv(L, R, "divtmp");
         case tok_eq: return Builder->CreateICmpEQ(L, R, "eqtmp");
         case tok_ne: return Builder->CreateICmpNE(L, R, "netmp");
         case '<':    return Builder->CreateICmpSLT(L, R, "slttmp");
