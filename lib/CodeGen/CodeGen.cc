@@ -17,6 +17,8 @@ CodeGen::CodeGen() {
     
     Arrays = std::make_unique<ArrayHandler>(*TheContext, *Builder, *TheModule, NamedValues, *RuntimeChecker);
     
+    FuncGen = std::make_unique<FunctionGen>(*TheContext, *TheModule, *Builder, NamedValues);
+
     SetupExternalFunctions();
 }
 
@@ -105,6 +107,15 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
             return nullptr;
         }
     }
+
+    if (auto *Call = dynamic_cast<CallExprAST*>(Expr)) {
+        std::vector<Value*> Args;
+        for (const auto &Arg : Call->getArgs()) {
+            Args.push_back(emitExpr(Arg.get()));
+        }
+        return FuncGen->emitCallExpr(Call, Args);
+    }
+
     return nullptr;
 }
 
@@ -261,6 +272,36 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         return;
     }
 
+    if (auto *FuncDef = dynamic_cast<FunctionDefAST*>(Stmt)) {
+        BasicBlock *SavedBlock = Builder->GetInsertBlock();
+
+        FuncGen->emitFunctionDef(FuncDef, [this](StmtAST *S) { 
+            this->emitStmt(S); 
+        });
+
+        if (SavedBlock) Builder->SetInsertPoint(SavedBlock);
+        
+        return;
+    }
+
+    else if (auto *Call = dynamic_cast<CallStmtAST*>(Stmt)) {
+        std::vector<Value*> Args;
+        for (const auto &ArgExpr : Call->getArgs()) {
+            Args.push_back(emitExpr(ArgExpr.get()));
+        }
+        FuncGen->emitCallStmt(Call, Args);
+        return;
+    }
+
+    else if (auto *Ret = dynamic_cast<ReturnStmtAST*>(Stmt)) {
+        Value *RetVal = nullptr;
+        if (Ret->getRetVal()) {
+            RetVal = emitExpr(Ret->getRetVal());
+        }
+        FuncGen->emitReturn(Ret, RetVal);
+        return;
+    }
+
     if (auto *Decl = dynamic_cast<DeclareStmtAST*>(Stmt)) {
         Function *TheFunction = Builder->GetInsertBlock()->getParent();
         AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Decl->getName());
@@ -313,4 +354,3 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         emitForStmt(ForStmt);
     }
 }
-

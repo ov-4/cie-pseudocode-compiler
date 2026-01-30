@@ -4,6 +4,7 @@
 #include "llvm/IR/Module.h"
 #include "cps/AST.h"
 #include "cps/RuntimeCheck.h"
+#include "cps/FunctionGen.h"
 #include <map>
 #include <memory>
 
@@ -19,6 +20,7 @@ class CodeGen {
     
     std::unique_ptr<ArrayHandler> Arrays;
     std::unique_ptr<RuntimeCheck> RuntimeChecker;
+    std::unique_ptr<FunctionGen> FuncGen;
 
     llvm::FunctionCallee PrintfFunc;
     llvm::FunctionCallee ScanfFunc;

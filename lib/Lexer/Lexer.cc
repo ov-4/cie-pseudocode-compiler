@@ -21,6 +21,9 @@ int Lexer::gettok() {
 
         if (IdentifierStr == "DECLARE") return tok_declare;
         if (IdentifierStr == "INTEGER") return tok_integer_kw;
+        if (IdentifierStr == "BOOLEAN") return tok_integer_kw; // TODO: implement real BOOLEAN
+        if (IdentifierStr == "REAL")    return tok_integer_kw; // TODO: implement real REAL
+        
         if (IdentifierStr == "INPUT") return tok_input;
         if (IdentifierStr == "OUTPUT") return tok_output;
         
@@ -43,6 +46,14 @@ int Lexer::gettok() {
 
         if (IdentifierStr == "ARRAY") return tok_array;
         if (IdentifierStr == "OF") return tok_of;
+
+        if (IdentifierStr == "FUNCTION") return tok_function;
+        if (IdentifierStr == "ENDFUNCTION") return tok_endfunction;
+        if (IdentifierStr == "PROCEDURE") return tok_procedure;
+        if (IdentifierStr == "ENDPROCEDURE") return tok_endprocedure;
+        if (IdentifierStr == "RETURN") return tok_return;
+        if (IdentifierStr == "RETURNS") return tok_returns;
+        if (IdentifierStr == "CALL") return tok_call;
 
         return tok_identifier;
     }
@@ -92,6 +103,15 @@ int Lexer::gettok() {
         LastChar = getchar();
         return tok_colon;
     }
+
+    if (LastChar == '(') { LastChar = getchar(); return '('; }
+    if (LastChar == ')') { LastChar = getchar(); return ')'; }
+    if (LastChar == '[') { LastChar = getchar(); return '['; }
+    if (LastChar == ']') { LastChar = getchar(); return ']'; }
+    if (LastChar == ',') { LastChar = getchar(); return ','; }
+    if (LastChar == '+') { LastChar = getchar(); return '+'; }
+    if (LastChar == '-') { LastChar = getchar(); return '-'; }
+    if (LastChar == '*') { LastChar = getchar(); return '*'; }
 
     if (LastChar == '/') {
         int NextChar = getchar();

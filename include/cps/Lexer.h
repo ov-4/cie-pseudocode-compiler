@@ -41,7 +41,15 @@ enum Token {
     tok_le = -203, // <=
     tok_ge = -204, // >=
     
-    tok_colon = -300 // :
+    tok_colon = -300, // :
+
+    tok_function = -400, 
+    tok_endfunction = -401, 
+    tok_return = -402, 
+    tok_returns = -403,
+    tok_procedure = -404, 
+    tok_endprocedure = -405, 
+    tok_call = -406  
 };
 
 class Lexer {

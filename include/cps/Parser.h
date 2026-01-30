@@ -31,6 +31,12 @@ class Parser {
     std::unique_ptr<StmtAST> ParseForStmt();
     
     std::unique_ptr<StmtAST> ParseDeclare();
+
+    std::unique_ptr<StmtAST> ParseFunction();
+    std::unique_ptr<StmtAST> ParseProcedure();
+    std::unique_ptr<StmtAST> ParseCallStmt();
+    std::unique_ptr<StmtAST> ParseReturnStmt();
+    std::vector<std::pair<std::string, std::string>> ParsePrototypeArgs();
     
 public:
     Parser(Lexer &L);

@@ -13,15 +13,24 @@ set(CMAKE_CXX_STANDARD 17)
 include_directories(include)
 
 add_library(CPSLexer lib/Lexer/Lexer.cc)
-add_library(CPSParser lib/Parser/Parser.cc)
+add_library(CPSParser 
+    lib/Parser/Parser.cc
+    lib/Parser/Parser_Function.cc
+)
 
 add_library(CPSCodeGen
     lib/CodeGen/CodeGen.cc
     lib/CodeGen/ArrayHandler.cc
     lib/CodeGen/RuntimeCheck.cc
+    lib/CodeGen/FunctionGen.cc
 )
 
 llvm_map_components_to_libnames(llvm_libs core support native irreader)
 
 add_executable(cpsc tools/driver/main.cc)
-target_link_libraries(cpsc CPSCodeGen CPSParser CPSLexer ${llvm_libs})
+target_link_libraries(cpsc
+    CPSCodeGen 
+    CPSParser 
+    CPSLexer 
+    ${llvm_libs}
+)

@@ -1,4 +1,5 @@
 #include "cps/Parser.h"
+#include "cps/FunctionAST.h"
 
 using namespace cps;
 
@@ -40,24 +41,40 @@ std::unique_ptr<ExprAST> Parser::ParseIdentifierExpr() {
     std::string IdName = Lex.IdentifierStr;
     int Line = Lex.getLine();
     getNextToken();
+
+    if (CurTok == '(') {
+        getNextToken();
+        std::vector<std::unique_ptr<ExprAST>> Args;
+        if (CurTok != ')') {
+            while (true) {
+                if (auto Arg = ParseExpression())
+                    Args.push_back(std::move(Arg));
+                else
+                    return nullptr;
+
+                if (CurTok == ')') break;
+
+                if (CurTok != ',') {
+                    fprintf(stderr, "Error: Expected ')' or ',' in function call.\n");
+                    return nullptr;
+                }
+                getNextToken();
+            }
+        }
+        getNextToken();
+        return std::make_unique<CallExprAST>(IdName, std::move(Args));
+    }
     
     if (CurTok == '[') {
         getNextToken();
         std::vector<std::unique_ptr<ExprAST>> Indices;
-        
         while (true) {
             auto Exp = ParseExpression();
             if (!Exp) return nullptr;
             Indices.push_back(std::move(Exp));
-            
-            if (CurTok == ']') {
-                break;
-            }
-            if (CurTok == ',') {
-                getNextToken();
-                continue;
-            }
-            fprintf(stderr, "Error: Expected ',' or ']' in array index\n");
+            if (CurTok == ']') break;
+            if (CurTok == ',') { getNextToken(); continue; }
+            fprintf(stderr, "Error: Expected ',' or ']'\n");
             return nullptr;
         }
         getNextToken(); 
@@ -406,6 +423,18 @@ std::unique_ptr<StmtAST> Parser::ParseStatement() {
     }
     else if (CurTok == tok_for) {
         return ParseForStmt();
+    }
+    else if (CurTok == tok_function) {
+        return ParseFunction();
+    }
+    else if (CurTok == tok_procedure) {
+        return ParseProcedure();
+    }
+    else if (CurTok == tok_call) {
+        return ParseCallStmt();
+    }
+    else if (CurTok == tok_return) {
+        return ParseReturnStmt();
     }
 
     return nullptr;
