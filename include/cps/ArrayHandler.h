@@ -24,7 +24,7 @@ class ArrayHandler {
     llvm::LLVMContext *TheContext;
     llvm::IRBuilder<> *Builder;
     llvm::Module *TheModule;
-    std::map<std::string, llvm::AllocaInst*> *NamedValues;
+    std::map<std::string, llvm::Value*> *NamedValues;
 
     std::map<std::string, ArrayMetadata> ArrayTable;
     RuntimeCheck &RuntimeChecker;
@@ -37,13 +37,13 @@ class ArrayHandler {
     void emitPrintLoop(const std::string &Name, int CurrentDim, std::vector<llvm::Value*> CurrentIndices, llvm::FunctionCallee PrintfFunc, llvm::Value* FmtStr);
 
 public:
-    ArrayHandler(llvm::LLVMContext &C, llvm::IRBuilder<> &B, llvm::Module &M, std::map<std::string, llvm::AllocaInst*> &NV);
+    ArrayHandler(llvm::LLVMContext &C, llvm::IRBuilder<> &B, llvm::Module &M, std::map<std::string, llvm::Value*> &NV);
 
     void setupExternalFunctions();
     
     void emitArrayDeclare(ArrayDeclareStmtAST *Stmt, CodeGen &CG);
     void emitArrayAssign(ArrayAssignStmtAST *Stmt, CodeGen &CG);
-    ArrayHandler(llvm::LLVMContext &C, llvm::IRBuilder<> &B, llvm::Module &M, std::map<std::string, llvm::AllocaInst*> &NV, RuntimeCheck &RC);
+    ArrayHandler(llvm::LLVMContext &C, llvm::IRBuilder<> &B, llvm::Module &M, std::map<std::string, llvm::Value*> &NV, RuntimeCheck &RC);
     
     llvm::Value* emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG);
 

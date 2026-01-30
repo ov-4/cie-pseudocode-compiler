@@ -8,7 +8,7 @@
 using namespace llvm;
 using namespace cps;
 
-ArrayHandler::ArrayHandler(LLVMContext &C, IRBuilder<> &B, Module &M, std::map<std::string, AllocaInst*> &NV, RuntimeCheck &RC)
+ArrayHandler::ArrayHandler(LLVMContext &C, IRBuilder<> &B, Module &M, std::map<std::string, Value*> &NV, RuntimeCheck &RC)
     : TheContext(&C), Builder(&B), TheModule(&M), NamedValues(&NV), RuntimeChecker(RC) {
     setupExternalFunctions();
 }
@@ -125,7 +125,7 @@ Value* ArrayHandler::emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG) {
     
     Value *Offset = computeFlatIndex(Name, Indices);
     
-    AllocaInst *Alloca = (*NamedValues)[Name];
+    Value *Alloca = (*NamedValues)[Name];
     Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
     Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
     Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);
@@ -154,7 +154,7 @@ void ArrayHandler::emitArrayAssign(ArrayAssignStmtAST *Stmt, CodeGen &CG) {
     Value *Val = CG.emitExpr(Stmt->getExpr());
     Value *Offset = computeFlatIndex(Name, Indices);
     
-    AllocaInst *Alloca = (*NamedValues)[Name];
+    Value *Alloca = (*NamedValues)[Name];
     Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
     Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
     Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);
@@ -197,7 +197,7 @@ void ArrayHandler::emitPrintLoop(const std::string &Name, int CurrentDim, std::v
     if (CurrentDim == Meta.Rank) {
         Value *Offset = computeFlatIndex(Name, CurrentIndices);
         
-        AllocaInst *Alloca = (*NamedValues)[Name];
+        Value *Alloca = (*NamedValues)[Name];
         Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
         Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
         Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);

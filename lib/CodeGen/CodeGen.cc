@@ -70,7 +70,7 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
     }
     
     if (auto *Var = dynamic_cast<VariableExprAST*>(Expr)) {
-        AllocaInst *A = NamedValues[Var->getName()];
+        Value *A = NamedValues[Var->getName()];
         if (!A) {
             fprintf(stderr, "Error: Unknown variable name %s\n", Var->getName().c_str());
             return nullptr;
@@ -109,9 +109,34 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
     }
 
     if (auto *Call = dynamic_cast<CallExprAST*>(Expr)) {
+        Function *CalleeF = TheModule->getFunction(Call->getCallee());
         std::vector<Value*> Args;
-        for (const auto &Arg : Call->getArgs()) {
-            Args.push_back(emitExpr(Arg.get()));
+        
+        for (unsigned i = 0; i < Call->getArgs().size(); ++i) {
+            ExprAST *ArgExpr = Call->getArgs()[i].get();
+            bool isByRef = false;
+
+            if (CalleeF && i < CalleeF->arg_size()) {
+                if (CalleeF->getArg(i)->getType()->isPointerTy()) {
+                    isByRef = true;
+                }
+            }
+
+            if (isByRef) {
+                if (auto *Var = dynamic_cast<VariableExprAST*>(ArgExpr)) {
+                    Value *Ptr = NamedValues[Var->getName()];
+                    if (!Ptr) {
+                        fprintf(stderr, "Error: Unknown variable %s in BYREF call\n", Var->getName().c_str());
+                        return nullptr;
+                    }
+                    Args.push_back(Ptr);
+                } else {
+                     fprintf(stderr, "Error: BYREF argument must be a variable.\n");
+                     return nullptr;
+                }
+            } else {
+                Args.push_back(emitExpr(ArgExpr));
+            }
         }
         return FuncGen->emitCallExpr(Call, Args);
     }
@@ -203,7 +228,7 @@ void CodeGen::emitForStmt(ForStmtAST *Stmt) {
     Value *StartVal = emitExpr(Stmt->getStart());
     if (!StartVal) return;
 
-    AllocaInst *Alloca = NamedValues[VarName];
+    Value *Alloca = NamedValues[VarName];
     if (!Alloca) {
         fprintf(stderr, "Error: Unknown variable in FOR loop %s\n", VarName.c_str());
         return;
@@ -285,9 +310,34 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
     }
 
     else if (auto *Call = dynamic_cast<CallStmtAST*>(Stmt)) {
+        Function *CalleeF = TheModule->getFunction(Call->getCallee());
         std::vector<Value*> Args;
-        for (const auto &ArgExpr : Call->getArgs()) {
-            Args.push_back(emitExpr(ArgExpr.get()));
+        
+        for (unsigned i = 0; i < Call->getArgs().size(); ++i) {
+            ExprAST *ArgExpr = Call->getArgs()[i].get();
+            bool isByRef = false;
+            
+            if (CalleeF && i < CalleeF->arg_size()) {
+                if (CalleeF->getArg(i)->getType()->isPointerTy()) {
+                    isByRef = true;
+                }
+            }
+
+            if (isByRef) {
+                if (auto *Var = dynamic_cast<VariableExprAST*>(ArgExpr)) {
+                    Value *Ptr = NamedValues[Var->getName()];
+                    if (!Ptr) {
+                        fprintf(stderr, "Error: Unknown variable %s in BYREF call\n", Var->getName().c_str());
+                        return;
+                    }
+                    Args.push_back(Ptr);
+                } else {
+                     fprintf(stderr, "Error: BYREF argument must be a variable.\n");
+                     return;
+                }
+            } else {
+                Args.push_back(emitExpr(ArgExpr));
+            }
         }
         FuncGen->emitCallStmt(Call, Args);
         return;
@@ -311,7 +361,7 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
     else if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt)) {
         Value *Val = emitExpr(Assign->getExpr());
         if (Val) {
-            AllocaInst *Alloca = NamedValues[Assign->getName()];
+            Value *Alloca = NamedValues[Assign->getName()];
             if (!Alloca) {
                 fprintf(stderr, "Error: Unknown variable name %s\n", Assign->getName().c_str());
                 return;
@@ -320,7 +370,7 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         }
     }
     else if (auto *In = dynamic_cast<InputStmtAST*>(Stmt)) {
-        AllocaInst *Alloca = NamedValues[In->getName()];
+        Value *Alloca = NamedValues[In->getName()];
         if (Alloca) {
             std::vector<Value*> Args;
             Args.push_back(ScanfFormatStr);

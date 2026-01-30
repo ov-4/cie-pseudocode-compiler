@@ -6,6 +6,7 @@
 #include <vector>
 #include <functional>
 #include <string>
+#include <tuple>
 
 namespace cps {
 
@@ -14,13 +15,13 @@ class FunctionGen {
     llvm::Module &Module;
     llvm::IRBuilder<> &Builder;
     
-    std::map<std::string, llvm::AllocaInst*> &NamedValues;
+    std::map<std::string, llvm::Value*> &NamedValues;
 
-    void createArgumentAllocas(llvm::Function *F, const std::vector<std::pair<std::string, std::string>> &Args);
+    void createArgumentAllocas(llvm::Function *F, const std::vector<std::tuple<std::string, std::string, bool>> &Args);
 
 public:
     FunctionGen(llvm::LLVMContext &C, llvm::Module &M, llvm::IRBuilder<> &B, 
-                std::map<std::string, llvm::AllocaInst*> &NV)
+                std::map<std::string, llvm::Value*> &NV)
         : Context(C), Module(M), Builder(B), NamedValues(NV) {}
 
     llvm::Type *getLLVMType(const std::string &TypeName);

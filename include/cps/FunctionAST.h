@@ -3,24 +3,25 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <tuple>
 
 namespace cps {
 
 class PrototypeAST {
     std::string Name;
-    std::vector<std::pair<std::string, std::string>> Args;
+    std::vector<std::tuple<std::string, std::string, bool>> Args;
     std::string ReturnType;
     bool IsExternal;
 
 public:
     PrototypeAST(const std::string &Name, 
-                 std::vector<std::pair<std::string, std::string>> Args, 
+                 std::vector<std::tuple<std::string, std::string, bool>> Args, 
                  const std::string &ReturnType,
                  bool IsExternal = false)
         : Name(Name), Args(std::move(Args)), ReturnType(ReturnType), IsExternal(IsExternal) {}
 
     const std::string &getName() const { return Name; }
-    const std::vector<std::pair<std::string, std::string>> &getArgs() const { return Args; }
+    const std::vector<std::tuple<std::string, std::string, bool>> &getArgs() const { return Args; }
     const std::string &getReturnType() const { return ReturnType; }
     bool isExternal() const { return IsExternal; }
 };

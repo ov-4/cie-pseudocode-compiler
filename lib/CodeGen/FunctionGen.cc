@@ -13,27 +13,37 @@ Type *FunctionGen::getLLVMType(const std::string &TypeName) {
     return Type::getInt64Ty(Context);
 }
 
-void FunctionGen::createArgumentAllocas(Function *F, const std::vector<std::pair<std::string, std::string>> &Args) {
+void FunctionGen::createArgumentAllocas(Function *F, const std::vector<std::tuple<std::string, std::string, bool>> &Args) {
     Function::arg_iterator AI = F->arg_begin();
     for (unsigned Idx = 0, E = Args.size(); Idx != E; ++Idx, ++AI) {
-        std::string ArgName = Args[Idx].first;
-        std::string ArgTypeStr = Args[Idx].second;
-        
-        Type *ArgType = getLLVMType(ArgTypeStr);
-        IRBuilder<> TmpB(&F->getEntryBlock(), F->getEntryBlock().begin());
-        AllocaInst *Alloca = TmpB.CreateAlloca(ArgType, nullptr, ArgName);
+        std::string ArgName = std::get<0>(Args[Idx]);
+        std::string ArgTypeStr = std::get<1>(Args[Idx]);
+        bool IsRef = std::get<2>(Args[Idx]);
         
         Value *ArgVal = &(*AI);
-        Builder.CreateStore(ArgVal, Alloca);
-        
-        NamedValues[ArgName] = Alloca; 
+        ArgVal->setName(ArgName);
+
+        if (IsRef) {
+            NamedValues[ArgName] = ArgVal;
+        } else {
+            Type *ArgType = getLLVMType(ArgTypeStr);
+            IRBuilder<> TmpB(&F->getEntryBlock(), F->getEntryBlock().begin());
+            AllocaInst *Alloca = TmpB.CreateAlloca(ArgType, nullptr, ArgName);
+            
+            Builder.CreateStore(ArgVal, Alloca);
+            NamedValues[ArgName] = Alloca; 
+        }
     }
 }
 
 Function *FunctionGen::emitPrototype(PrototypeAST *Proto) {
     std::vector<Type*> ArgTypes;
     for (const auto &Arg : Proto->getArgs()) {
-        ArgTypes.push_back(getLLVMType(Arg.second));
+        Type *T = getLLVMType(std::get<1>(Arg));
+        if (std::get<2>(Arg)) {
+            T = T->getPointerTo();
+        }
+        ArgTypes.push_back(T);
     }
 
     Type *RetType = getLLVMType(Proto->getReturnType());
@@ -43,7 +53,7 @@ Function *FunctionGen::emitPrototype(PrototypeAST *Proto) {
     unsigned Idx = 0;
     for (auto &Arg : F->args()) {
         if (Idx < Proto->getArgs().size())
-            Arg.setName(Proto->getArgs()[Idx++].first);
+            Arg.setName(std::get<0>(Proto->getArgs()[Idx++]));
     }
     return F;
 }
@@ -65,7 +75,7 @@ Function *FunctionGen::emitFunctionDef(FunctionDefAST *FuncAST,
     BasicBlock *BB = BasicBlock::Create(Context, "entry", TheFunction);
     Builder.SetInsertPoint(BB);
 
-    std::map<std::string, llvm::AllocaInst*> OldNamedValues = NamedValues;
+    std::map<std::string, llvm::Value*> OldNamedValues = NamedValues;
     NamedValues.clear();
     
     createArgumentAllocas(TheFunction, Proto->getArgs());

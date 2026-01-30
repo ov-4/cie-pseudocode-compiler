@@ -54,6 +54,9 @@ int Lexer::gettok() {
         if (IdentifierStr == "RETURN") return tok_return;
         if (IdentifierStr == "RETURNS") return tok_returns;
         if (IdentifierStr == "CALL") return tok_call;
+        
+        if (IdentifierStr == "BYREF") return tok_byref;
+        if (IdentifierStr == "BYVAL") return tok_byval;
 
         return tok_identifier;
     }

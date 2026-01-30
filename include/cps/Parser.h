@@ -36,7 +36,7 @@ class Parser {
     std::unique_ptr<StmtAST> ParseProcedure();
     std::unique_ptr<StmtAST> ParseCallStmt();
     std::unique_ptr<StmtAST> ParseReturnStmt();
-    std::vector<std::pair<std::string, std::string>> ParsePrototypeArgs();
+    std::vector<std::tuple<std::string, std::string, bool>> ParsePrototypeArgs();
     
 public:
     Parser(Lexer &L);

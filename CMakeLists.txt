@@ -15,7 +15,7 @@ include_directories(include)
 add_library(CPSLexer lib/Lexer/Lexer.cc)
 add_library(CPSParser 
     lib/Parser/Parser.cc
-    lib/Parser/Parser_Function.cc
+    lib/Parser/ParserFunction.cc
 )
 
 add_library(CPSCodeGen

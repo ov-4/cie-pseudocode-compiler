@@ -16,7 +16,7 @@ class CodeGen {
     std::unique_ptr<llvm::LLVMContext> TheContext;
     std::unique_ptr<llvm::Module> TheModule;
     std::unique_ptr<llvm::IRBuilder<>> Builder;
-    std::map<std::string, llvm::AllocaInst*> NamedValues;
+    std::map<std::string, llvm::Value*> NamedValues;
     
     std::unique_ptr<ArrayHandler> Arrays;
     std::unique_ptr<RuntimeCheck> RuntimeChecker;

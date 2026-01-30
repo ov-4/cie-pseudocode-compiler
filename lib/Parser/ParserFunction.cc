@@ -1,15 +1,25 @@
 #include "cps/Parser.h"
 #include "cps/FunctionAST.h"
+#include <tuple>
 
 using namespace cps;
 
-std::vector<std::pair<std::string, std::string>> Parser::ParsePrototypeArgs() {
-    std::vector<std::pair<std::string, std::string>> Args;
+std::vector<std::tuple<std::string, std::string, bool>> Parser::ParsePrototypeArgs() {
+    std::vector<std::tuple<std::string, std::string, bool>> Args;
     if (CurTok != '(') return Args;
     getNextToken();
 
     while (CurTok != ')') {
         if (CurTok == -1000 || CurTok == -1001) getNextToken();
+
+        bool IsRef = false;
+        if (CurTok == tok_byref) {
+            IsRef = true;
+            getNextToken();
+        } else if (CurTok == tok_byval) {
+            IsRef = false;
+            getNextToken();
+        }
 
         if (CurTok != tok_identifier) {
             fprintf(stderr, "Error: Expected argument name\n");
@@ -35,7 +45,7 @@ std::vector<std::pair<std::string, std::string>> Parser::ParsePrototypeArgs() {
              return Args;
         }
 
-        Args.push_back({Name, Type});
+        Args.emplace_back(Name, Type, IsRef);
 
         if (CurTok == ')') break;
         if (CurTok != ',') {
