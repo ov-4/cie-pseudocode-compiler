@@ -24,6 +24,7 @@ CodeGen::CodeGen() {
     RealHelper = std::make_unique<RealHandler>(*TheContext, *Builder, *TheModule, NamedValues);
     BoolHandler = std::make_unique<BooleanHandler>(*TheContext, *Builder, *TheModule, NamedValues);
     ArithHandler = std::make_unique<ArithmeticHandler>(*TheContext, *Builder);
+    StrHandler = std::make_unique<StringHandler>(*TheContext, *Builder, *TheModule, NamedValues);
 
     SetupExternalFunctions();
 }
@@ -43,6 +44,7 @@ void CodeGen::SetupExternalFunctions() {
 
     ScanfFormatStr = Builder->CreateGlobalStringPtr("%lld", "fmt_in", 0, TheModule.get());
     ScanfFloatFormatStr = Builder->CreateGlobalStringPtr("%lf", "fmt_in_flt", 0, TheModule.get());
+    ScanfStringFormatStr = Builder->CreateGlobalStringPtr("%s", "fmt_in_str", 0, TheModule.get()); // NEW
 
     TrueStr = Builder->CreateGlobalStringPtr("TRUE", "str_true", 0, TheModule.get());
     FalseStr = Builder->CreateGlobalStringPtr("FALSE", "str_false", 0, TheModule.get());
@@ -89,6 +91,10 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
     if (auto *Bool = dynamic_cast<BooleanExprAST*>(Expr)) {
         return BoolHandler->createLiteral(Bool->getVal());
     }
+
+    if (auto *Str = dynamic_cast<StringExprAST*>(Expr)) {
+        return StrHandler->createLiteral(Str->getVal());
+    }
     
     if (auto *Var = dynamic_cast<VariableExprAST*>(Expr)) {
         Value *A = NamedValues[Var->getName()];
@@ -129,6 +135,31 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
     }
 
     if (auto *Call = dynamic_cast<CallExprAST*>(Expr)) {
+        std::string Name = Call->getCallee();
+        if (Name == "LENGTH") {
+            if (Call->getArgs().size() != 1) { fprintf(stderr, "LENGTH expects 1 arg\n"); return nullptr; }
+            return StrHandler->emitLength(emitExpr(Call->getArgs()[0].get()));
+        }
+        if (Name == "MID") {
+            if (Call->getArgs().size() != 3) { fprintf(stderr, "MID expects 3 args\n"); return nullptr; }
+            return StrHandler->emitMid(emitExpr(Call->getArgs()[0].get()), 
+                                       emitExpr(Call->getArgs()[1].get()), 
+                                       emitExpr(Call->getArgs()[2].get()));
+        }
+        if (Name == "RIGHT") {
+            if (Call->getArgs().size() != 2) { fprintf(stderr, "RIGHT expects 2 args\n"); return nullptr; }
+            return StrHandler->emitRight(emitExpr(Call->getArgs()[0].get()), 
+                                         emitExpr(Call->getArgs()[1].get()));
+        }
+        if (Name == "LCASE") {
+            if (Call->getArgs().size() != 1) { fprintf(stderr, "LCASE expects 1 arg\n"); return nullptr; }
+            return StrHandler->emitLCase(emitExpr(Call->getArgs()[0].get()));
+        }
+        if (Name == "UCASE") {
+            if (Call->getArgs().size() != 1) { fprintf(stderr, "UCASE expects 1 arg\n"); return nullptr; }
+            return StrHandler->emitUCase(emitExpr(Call->getArgs()[0].get()));
+        }
+
         Function *CalleeF = TheModule->getFunction(Call->getCallee());
         std::vector<Value*> Args;
         
@@ -382,6 +413,7 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         if (Decl->getType() == "INTEGER") IntHandler->emitDeclare(Decl->getName());
         else if (Decl->getType() == "REAL") RealHelper->emitDeclare(Decl->getName());
         else if (Decl->getType() == "BOOLEAN") BoolHandler->emitDeclare(Decl->getName());
+        else if (Decl->getType() == "STRING") StrHandler->emitDeclare(Decl->getName());
         else {
             fprintf(stderr, "Unknown type %s\n", Decl->getType().c_str());
         }
@@ -429,6 +461,22 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
                  Value *BoolVal = Builder->CreateICmpNE(Val, ConstantInt::get(*TheContext, APInt(64, 0)), "bool_cast");
                  
                  Builder->CreateStore(BoolVal, Alloca);
+            } else if (AI->getAllocatedType()->isPointerTy()) {
+                 Value *BufSize = ConstantInt::get(*TheContext, APInt(64, 256));
+
+                 Args.push_back(ScanfStringFormatStr);
+
+                 AllocaInst *InputBuf = Builder->CreateAlloca(Type::getInt8Ty(*TheContext), ConstantInt::get(*TheContext, APInt(64, 1024)), "input_buf");
+                 Args.push_back(InputBuf);
+                 Builder->CreateCall(ScanfFunc, Args);
+
+                 Function *MallocF = TheModule->getFunction("malloc");
+                 if (MallocF) {
+                     Value *Mem = Builder->CreateCall(MallocF, ConstantInt::get(*TheContext, APInt(64, 1024)));
+                     Args[1] = Mem;
+                     Builder->CreateCall(ScanfFunc, Args);
+                     Builder->CreateStore(Mem, Alloca);
+                 }
             } else {
                  Args.push_back(ScanfFormatStr);
                  Args.push_back(Alloca); 
@@ -450,6 +498,9 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
                      Args.push_back(PrintfStringFormatStr);
                      Value *StrPtr = Builder->CreateSelect(Val, TrueStr, FalseStr);
                      Args.push_back(StrPtr);
+                } else if (Val->getType()->isPointerTy()) {
+                     Args.push_back(PrintfStringFormatStr);
+                     Args.push_back(Val);
                 } else {
                      Args.push_back(PrintfFormatStr);
                      Args.push_back(Val);

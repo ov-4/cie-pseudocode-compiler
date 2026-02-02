@@ -15,6 +15,17 @@ int Lexer::gettok() {
         LastChar = getchar();
     }
 
+    if (LastChar == '"') {
+        StringVal = "";
+        LastChar = getchar();
+        while (LastChar != '"' && LastChar != EOF) {
+            StringVal += LastChar;
+            LastChar = getchar();
+        }
+        if (LastChar == '"') LastChar = getchar();
+        return tok_string_literal;
+    }
+
     if (isalpha(LastChar)) {
         IdentifierStr = LastChar;
         while (isalnum((LastChar = getchar())) || LastChar == '_')
@@ -24,7 +35,8 @@ int Lexer::gettok() {
         if (IdentifierStr == "INTEGER") return tok_integer_kw;
         if (IdentifierStr == "BOOLEAN") return tok_boolean_kw; 
         if (IdentifierStr == "REAL")    return tok_real_kw; 
-        
+        if (IdentifierStr == "STRING")  return tok_string_kw;
+
         if (IdentifierStr == "TRUE") return tok_true;
         if (IdentifierStr == "FALSE") return tok_false;
 
@@ -57,6 +69,12 @@ int Lexer::gettok() {
         if (IdentifierStr == "AND") return tok_and;
         if (IdentifierStr == "OR") return tok_or;
         if (IdentifierStr == "NOT") return tok_not;
+
+        if (IdentifierStr == "LENGTH") return tok_length;
+        if (IdentifierStr == "MID") return tok_mid;
+        if (IdentifierStr == "RIGHT") return tok_right;
+        if (IdentifierStr == "LCASE") return tok_lcase;
+        if (IdentifierStr == "UCASE") return tok_ucase;
 
         if (IdentifierStr == "FUNCTION") return tok_function;
         if (IdentifierStr == "ENDFUNCTION") return tok_endfunction;

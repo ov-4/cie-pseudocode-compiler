@@ -41,6 +41,14 @@ enum Token {
     tok_or = -26,
     tok_not = -27,
 
+    tok_string_kw = -30,
+    tok_length = -31,
+    tok_mid = -32,
+    tok_right = -33,
+    tok_lcase = -34,
+    tok_ucase = -35,
+    tok_string_literal = -36,
+
     tok_identifier = -100,
     tok_number_int = -101,
     tok_number_real = -102,
@@ -71,6 +79,7 @@ class Lexer {
     int CurrentLine = 1;
 public:
     std::string IdentifierStr;
+    std::string StringVal;
     int64_t NumVal;
     double RealVal;
 

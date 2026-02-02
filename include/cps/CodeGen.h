@@ -10,6 +10,7 @@
 #include "cps/RealHandler.h"
 #include "cps/BooleanHandler.h"
 #include "cps/ArithmeticHandler.h"
+#include "cps/StringHandler.h"
 
 #include <map>
 #include <memory>
@@ -32,6 +33,7 @@ class CodeGen {
     std::unique_ptr<RealHandler> RealHelper;
     std::unique_ptr<BooleanHandler> BoolHandler;
     std::unique_ptr<ArithmeticHandler> ArithHandler;
+    std::unique_ptr<StringHandler> StrHandler;
 
     llvm::FunctionCallee PrintfFunc;
     llvm::FunctionCallee ScanfFunc;
@@ -42,6 +44,7 @@ class CodeGen {
     
     llvm::Value *ScanfFormatStr;        // %lld
     llvm::Value *ScanfFloatFormatStr;   // %lf
+    llvm::Value *ScanfStringFormatStr;  // %s
     
     llvm::Value *TrueStr;               // "TRUE"
     llvm::Value *FalseStr;              // "FALSE"

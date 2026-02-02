@@ -95,6 +95,34 @@ std::unique_ptr<ExprAST> Parser::ParseIdentifierExpr() {
     return std::make_unique<VariableExprAST>(IdName);
 }
 
+std::unique_ptr<ExprAST> Parser::ParseStringBuiltin(const std::string &FuncName) {
+    getNextToken();
+    if (CurTok != '(') {
+        fprintf(stderr, "Error: Expected '(' after %s\n", FuncName.c_str());
+        return nullptr;
+    }
+    getNextToken();
+
+    std::vector<std::unique_ptr<ExprAST>> Args;
+    if (CurTok != ')') {
+        while (true) {
+            if (auto Arg = ParseExpression())
+                Args.push_back(std::move(Arg));
+            else
+                return nullptr;
+
+            if (CurTok == ')') break;
+            if (CurTok != ',') {
+                fprintf(stderr, "Error: Expected ',' or ')' in %s\n", FuncName.c_str());
+                return nullptr;
+            }
+            getNextToken();
+        }
+    }
+    getNextToken(); 
+    return std::make_unique<CallExprAST>(FuncName, std::move(Args));
+}
+
 std::unique_ptr<ExprAST> Parser::ParseParenExpr() {
     getNextToken();
     auto V = ParseExpression();
@@ -112,6 +140,17 @@ std::unique_ptr<ExprAST> Parser::ParsePrimary() {
     case tok_identifier: return ParseIdentifierExpr();
     case tok_number_int: return ParseNumberExpr();
     case tok_number_real: return ParseNumberExpr();
+    case tok_string_literal: {
+        auto Res = std::make_unique<StringExprAST>(Lex.StringVal);
+        getNextToken();
+        return Res;
+    }
+    case tok_length: return ParseStringBuiltin("LENGTH");
+    case tok_mid:    return ParseStringBuiltin("MID");
+    case tok_right:  return ParseStringBuiltin("RIGHT");
+    case tok_lcase:  return ParseStringBuiltin("LCASE");
+    case tok_ucase:  return ParseStringBuiltin("UCASE");
+
     case tok_true: {
         getNextToken();
         return std::make_unique<BooleanExprAST>(true);
@@ -241,6 +280,7 @@ std::unique_ptr<StmtAST> Parser::ParseDeclare() {
         if (CurTok == tok_integer_kw) TypeStr = "INTEGER";
         else if (CurTok == tok_real_kw) TypeStr = "REAL";
         else if (CurTok == tok_boolean_kw) TypeStr = "BOOLEAN";
+        else if (CurTok == tok_string_kw) TypeStr = "STRING";
         else {
             fprintf(stderr, "Error: Unknown type in declaration\n");
             return nullptr;

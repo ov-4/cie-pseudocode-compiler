@@ -32,6 +32,13 @@ public:
     bool getVal() const { return Val; }
 };
 
+class StringExprAST : public ExprAST {
+    std::string Val;
+public:
+    StringExprAST(const std::string &Val) : Val(Val) {}
+    const std::string &getVal() const { return Val; }
+};
+
 class VariableExprAST : public ExprAST {
     std::string Name;
 public:

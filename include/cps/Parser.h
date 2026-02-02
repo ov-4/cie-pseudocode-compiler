@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <map>
+#include <tuple>
 
 namespace cps {
 
@@ -24,6 +25,8 @@ class Parser {
     std::unique_ptr<ExprAST> ParseNumberExpr();
     std::unique_ptr<ExprAST> ParseIdentifierExpr();
     std::unique_ptr<ExprAST> ParseParenExpr();
+    
+    std::unique_ptr<ExprAST> ParseStringBuiltin(const std::string &FuncName);
 
     std::unique_ptr<StmtAST> ParseStatement();
     std::unique_ptr<StmtAST> ParseIfStmt();
