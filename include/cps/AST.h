@@ -11,11 +11,25 @@ public:
     virtual ~ExprAST() = default;
 };
 
-class NumberExprAST : public ExprAST {
+class IntegerExprAST : public ExprAST {
     int64_t Val;
 public:
-    NumberExprAST(int64_t Val) : Val(Val) {}
+    IntegerExprAST(int64_t Val) : Val(Val) {}
     int64_t getVal() const { return Val; }
+};
+
+class RealExprAST : public ExprAST {
+    double Val;
+public:
+    RealExprAST(double Val) : Val(Val) {}
+    double getVal() const { return Val; }
+};
+
+class BooleanExprAST : public ExprAST {
+    bool Val;
+public:
+    BooleanExprAST(bool Val) : Val(Val) {}
+    bool getVal() const { return Val; }
 };
 
 class VariableExprAST : public ExprAST {
@@ -57,9 +71,12 @@ public:
 
 class DeclareStmtAST : public StmtAST {
     std::string Name;
+    std::string Type;
 public:
-    DeclareStmtAST(const std::string &Name) : Name(Name) {}
+    DeclareStmtAST(const std::string &Name, const std::string &Type = "INTEGER") 
+        : Name(Name), Type(Type) {}
     const std::string &getName() const { return Name; }
+    const std::string &getType() const { return Type; }
 };
 
 class ArrayDeclareStmtAST : public StmtAST {

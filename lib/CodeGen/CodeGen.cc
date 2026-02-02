@@ -1,6 +1,7 @@
 #include "cps/CodeGen.h"
 #include "cps/ArrayHandler.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/Instructions.h" 
 #include "cps/Lexer.h"
 
 using namespace llvm;
@@ -19,6 +20,11 @@ CodeGen::CodeGen() {
     
     FuncGen = std::make_unique<FunctionGen>(*TheContext, *TheModule, *Builder, NamedValues);
 
+    IntHandler = std::make_unique<IntegerHandler>(*TheContext, *Builder, *TheModule, NamedValues);
+    RealHelper = std::make_unique<RealHandler>(*TheContext, *Builder, *TheModule, NamedValues);
+    BoolHandler = std::make_unique<BooleanHandler>(*TheContext, *Builder, *TheModule, NamedValues);
+    ArithHandler = std::make_unique<ArithmeticHandler>(*TheContext, *Builder);
+
     SetupExternalFunctions();
 }
 
@@ -32,7 +38,14 @@ void CodeGen::SetupExternalFunctions() {
     ScanfFunc = TheModule->getOrInsertFunction("scanf", ScanfType);
 
     PrintfFormatStr = Builder->CreateGlobalStringPtr("%lld\n", "fmt_nl", 0, TheModule.get());
+    PrintfFloatFormatStr = Builder->CreateGlobalStringPtr("%f\n", "fmt_flt", 0, TheModule.get());
+    PrintfStringFormatStr = Builder->CreateGlobalStringPtr("%s\n", "fmt_str", 0, TheModule.get());
+
     ScanfFormatStr = Builder->CreateGlobalStringPtr("%lld", "fmt_in", 0, TheModule.get());
+    ScanfFloatFormatStr = Builder->CreateGlobalStringPtr("%lf", "fmt_in_flt", 0, TheModule.get());
+
+    TrueStr = Builder->CreateGlobalStringPtr("TRUE", "str_true", 0, TheModule.get());
+    FalseStr = Builder->CreateGlobalStringPtr("FALSE", "str_false", 0, TheModule.get());
     
     Arrays->setupExternalFunctions();
 }
@@ -65,8 +78,16 @@ void CodeGen::print() {
 Value *CodeGen::emitExpr(ExprAST *Expr) {
     if (!Expr) return nullptr;
 
-    if (auto *Num = dynamic_cast<NumberExprAST*>(Expr)) {
-        return ConstantInt::get(*TheContext, APInt(64, Num->getVal(), true)); 
+    if (auto *Num = dynamic_cast<IntegerExprAST*>(Expr)) {
+        return IntHandler->createLiteral(Num->getVal());
+    }
+
+    if (auto *Real = dynamic_cast<RealExprAST*>(Expr)) {
+        return RealHelper->createLiteral(Real->getVal());
+    }
+
+    if (auto *Bool = dynamic_cast<BooleanExprAST*>(Expr)) {
+        return BoolHandler->createLiteral(Bool->getVal());
     }
     
     if (auto *Var = dynamic_cast<VariableExprAST*>(Expr)) {
@@ -76,9 +97,9 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
             return nullptr;
         }
         
-        return Builder->CreateLoad(Type::getInt64Ty(*TheContext), A, Var->getName().c_str());
+        Type *AllocType = cast<AllocaInst>(A)->getAllocatedType();
+        return Builder->CreateLoad(AllocType, A, Var->getName().c_str());
     }
-    
 
     if (auto *ArrAcc = dynamic_cast<ArrayAccessExprAST*>(Expr)) {
         return Arrays->emitArrayAccess(ArrAcc, *this);
@@ -89,23 +110,7 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         Value *R = emitExpr(Bin->getRHS());
         if (!L || !R) return nullptr;
 
-        switch (Bin->getOp()) {
-        case '+': return Builder->CreateAdd(L, R, "addtmp");
-        case '-': return Builder->CreateSub(L, R, "subtmp");
-        case '*': return Builder->CreateMul(L, R, "multmp");
-        case '/': 
-            RuntimeChecker->emitDivZeroCheck(R, Bin->getLine());
-            return Builder->CreateSDiv(L, R, "divtmp");
-        case tok_eq: return Builder->CreateICmpEQ(L, R, "eqtmp");
-        case tok_ne: return Builder->CreateICmpNE(L, R, "netmp");
-        case '<':    return Builder->CreateICmpSLT(L, R, "slttmp");
-        case '>':    return Builder->CreateICmpSGT(L, R, "sgttmp");
-        case tok_le: return Builder->CreateICmpSLE(L, R, "sletmp");
-        case tok_ge: return Builder->CreateICmpSGE(L, R, "sgetmp");
-        default:  
-            fprintf(stderr, "Error: Invalid binary operator\n");
-            return nullptr;
-        }
+        return ArithHandler->emitBinaryOp(Bin->getOp(), L, R, Bin->getLine());
     }
 
     if (auto *Call = dynamic_cast<CallExprAST*>(Expr)) {
@@ -150,6 +155,8 @@ void CodeGen::emitIfStmt(IfStmtAST *Stmt) {
 
     if (CondV->getType()->isIntegerTy(64))
         CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "ifcond");
+    if (CondV->getType()->isIntegerTy(1))
+         CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(1, 0)), "ifcond");
 
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
     BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
@@ -183,6 +190,8 @@ void CodeGen::emitWhileStmt(WhileStmtAST *Stmt) {
     if (!CondV) return;
     if (CondV->getType()->isIntegerTy(64))
         CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "loopcond");
+    if (CondV->getType()->isIntegerTy(1))
+        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(1, 0)), "loopcond");
     
     Builder->CreateCondBr(CondV, LoopBB, AfterBB);
 
@@ -215,6 +224,8 @@ void CodeGen::emitRepeatStmt(RepeatStmtAST *Stmt) {
     
     if (CondV->getType()->isIntegerTy(64))
         CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "untilcond");
+    if (CondV->getType()->isIntegerTy(1))
+        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(1, 0)), "untilcond");
 
     Builder->CreateCondBr(CondV, AfterBB, LoopBB);
 
@@ -249,7 +260,7 @@ void CodeGen::emitForStmt(ForStmtAST *Stmt) {
 
     bool isNegativeStep = false;
     if (Stmt->getStep()) {
-        if (auto *Num = dynamic_cast<NumberExprAST*>(Stmt->getStep())) {
+        if (auto *Num = dynamic_cast<IntegerExprAST*>(Stmt->getStep())) {
             if (Num->getVal() < 0) isNegativeStep = true;
         }
     }
@@ -353,10 +364,12 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
     }
 
     if (auto *Decl = dynamic_cast<DeclareStmtAST*>(Stmt)) {
-        Function *TheFunction = Builder->GetInsertBlock()->getParent();
-        AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Decl->getName());
-        NamedValues[Decl->getName()] = Alloca;
-        Builder->CreateStore(ConstantInt::get(*TheContext, APInt(64, 0)), Alloca);
+        if (Decl->getType() == "INTEGER") IntHandler->emitDeclare(Decl->getName());
+        else if (Decl->getType() == "REAL") RealHelper->emitDeclare(Decl->getName());
+        else if (Decl->getType() == "BOOLEAN") BoolHandler->emitDeclare(Decl->getName());
+        else {
+            fprintf(stderr, "Unknown type %s\n", Decl->getType().c_str());
+        }
     }
     else if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt)) {
         Value *Val = emitExpr(Assign->getExpr());
@@ -366,16 +379,41 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
                 fprintf(stderr, "Error: Unknown variable name %s\n", Assign->getName().c_str());
                 return;
             }
+            
+            AllocaInst *AI = cast<AllocaInst>(Alloca);
+            
+            if (AI->getAllocatedType() == Type::getDoubleTy(*TheContext) && Val->getType()->isIntegerTy(64)) {
+                Val = Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext));
+            }
             Builder->CreateStore(Val, Alloca);
         }
     }
     else if (auto *In = dynamic_cast<InputStmtAST*>(Stmt)) {
         Value *Alloca = NamedValues[In->getName()];
         if (Alloca) {
+            AllocaInst *AI = cast<AllocaInst>(Alloca);
             std::vector<Value*> Args;
-            Args.push_back(ScanfFormatStr);
-            Args.push_back(Alloca); 
-            Builder->CreateCall(ScanfFunc, Args);
+            
+            if (AI->getAllocatedType()->isDoubleTy()) {
+                 Args.push_back(ScanfFloatFormatStr); 
+                 Args.push_back(Alloca); 
+                 Builder->CreateCall(ScanfFunc, Args);
+            } else if (AI->getAllocatedType()->isIntegerTy(1)) {
+                 AllocaInst *TempInt = CreateEntryBlockAlloca(Builder->GetInsertBlock()->getParent(), "tmp_bool_input");
+                 
+                 Args.push_back(ScanfFormatStr); 
+                 Args.push_back(TempInt);
+                 Builder->CreateCall(ScanfFunc, Args);
+
+                 Value *Val = Builder->CreateLoad(Type::getInt64Ty(*TheContext), TempInt);
+                 Value *BoolVal = Builder->CreateICmpNE(Val, ConstantInt::get(*TheContext, APInt(64, 0)), "bool_cast");
+                 
+                 Builder->CreateStore(BoolVal, Alloca);
+            } else {
+                 Args.push_back(ScanfFormatStr);
+                 Args.push_back(Alloca); 
+                 Builder->CreateCall(ScanfFunc, Args);
+            }
         }
     }
     else if (auto *Out = dynamic_cast<OutputStmtAST*>(Stmt)) {
@@ -385,8 +423,18 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
             Value *Val = emitExpr(Out->getExpr());
             if (Val) {
                 std::vector<Value*> Args;
-                Args.push_back(PrintfFormatStr);
-                Args.push_back(Val);
+                if (Val->getType()->isDoubleTy()) {
+                     Args.push_back(PrintfFloatFormatStr);
+                     Args.push_back(Val);
+                } else if (Val->getType()->isIntegerTy(1)) {
+                     Args.push_back(PrintfStringFormatStr);
+                     Value *StrPtr = Builder->CreateSelect(Val, TrueStr, FalseStr);
+                     Args.push_back(StrPtr);
+                } else {
+                     Args.push_back(PrintfFormatStr);
+                     Args.push_back(Val);
+                }
+                
                 Builder->CreateCall(PrintfFunc, Args);
             }
         }

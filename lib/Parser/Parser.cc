@@ -16,8 +16,11 @@ Parser::Parser(Lexer &L) : Lex(L) {
 
     BinopPrecedence['+'] = 20;
     BinopPrecedence['-'] = 20;
+    
     BinopPrecedence['*'] = 40;
     BinopPrecedence['/'] = 40;
+    BinopPrecedence[tok_div] = 40;
+    BinopPrecedence[tok_mod] = 40;
 }
 
 int Parser::GetTokPrecedence() {
@@ -32,7 +35,13 @@ int Parser::getNextToken() {
 }
 
 std::unique_ptr<ExprAST> Parser::ParseNumberExpr() {
-    auto Result = std::make_unique<NumberExprAST>(Lex.NumVal);
+    if (CurTok == tok_number_real) {
+        auto Result = std::make_unique<RealExprAST>(Lex.RealVal);
+        getNextToken();
+        return Result;
+    }
+    // Default to Int
+    auto Result = std::make_unique<IntegerExprAST>(Lex.NumVal);
     getNextToken();
     return Result;
 }
@@ -99,7 +108,16 @@ std::unique_ptr<ExprAST> Parser::ParseParenExpr() {
 std::unique_ptr<ExprAST> Parser::ParsePrimary() {
     switch (CurTok) {
     case tok_identifier: return ParseIdentifierExpr();
-    case tok_number:     return ParseNumberExpr();
+    case tok_number_int: return ParseNumberExpr();
+    case tok_number_real: return ParseNumberExpr();
+    case tok_true: {
+        getNextToken();
+        return std::make_unique<BooleanExprAST>(true);
+    }
+    case tok_false: {
+        getNextToken();
+        return std::make_unique<BooleanExprAST>(false);
+    }
     case '(':            return ParseParenExpr();
     default:
         fprintf(stderr, "Error: unknown token '%c' (%d) at line %d when expecting an expression\n", 
@@ -206,12 +224,18 @@ std::unique_ptr<StmtAST> Parser::ParseDeclare() {
         
         return std::make_unique<ArrayDeclareStmtAST>(Name, std::move(Bounds), "INTEGER");
     } 
-    else if (CurTok == tok_integer_kw) {
+    else {
+        std::string TypeStr;
+        if (CurTok == tok_integer_kw) TypeStr = "INTEGER";
+        else if (CurTok == tok_real_kw) TypeStr = "REAL";
+        else if (CurTok == tok_boolean_kw) TypeStr = "BOOLEAN";
+        else {
+            fprintf(stderr, "Error: Unknown type in declaration\n");
+            return nullptr;
+        }
         getNextToken();
-        return std::make_unique<DeclareStmtAST>(Name);
+        return std::make_unique<DeclareStmtAST>(Name, TypeStr);
     }
-    
-    return nullptr;
 }
 
 std::unique_ptr<StmtAST> Parser::ParseIfStmt() {

@@ -32,15 +32,24 @@ enum Token {
     tok_array = -19,
     tok_of = -20,
 
+    tok_real_kw = -21,
+    tok_boolean_kw = -22,
+    tok_true = -23,
+    tok_false = -24,
+
     tok_identifier = -100,
-    tok_number = -101,
+    tok_number_int = -101,
+    tok_number_real = -102,
     
     tok_assign = -200, // <-
     tok_eq = -201, // =
     tok_ne = -202, // <>
     tok_le = -203, // <=
     tok_ge = -204, // >=
-    
+
+    tok_div = -205,
+    tok_mod = -206,
+
     tok_colon = -300, // :
 
     tok_function = -400, 
@@ -59,6 +68,7 @@ class Lexer {
 public:
     std::string IdentifierStr;
     int64_t NumVal;
+    double RealVal;
 
     int gettok();
     int getLine() const { return CurrentLine; }

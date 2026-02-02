@@ -5,6 +5,12 @@
 #include "cps/AST.h"
 #include "cps/RuntimeCheck.h"
 #include "cps/FunctionGen.h"
+
+#include "cps/IntegerHandler.h"
+#include "cps/RealHandler.h"
+#include "cps/BooleanHandler.h"
+#include "cps/ArithmeticHandler.h"
+
 #include <map>
 #include <memory>
 
@@ -22,10 +28,23 @@ class CodeGen {
     std::unique_ptr<RuntimeCheck> RuntimeChecker;
     std::unique_ptr<FunctionGen> FuncGen;
 
+    std::unique_ptr<IntegerHandler> IntHandler;
+    std::unique_ptr<RealHandler> RealHelper;
+    std::unique_ptr<BooleanHandler> BoolHandler;
+    std::unique_ptr<ArithmeticHandler> ArithHandler;
+
     llvm::FunctionCallee PrintfFunc;
     llvm::FunctionCallee ScanfFunc;
-    llvm::Value *PrintfFormatStr;
-    llvm::Value *ScanfFormatStr;
+    
+    llvm::Value *PrintfFormatStr;       // %lld\n
+    llvm::Value *PrintfFloatFormatStr;  // %f\n
+    llvm::Value *PrintfStringFormatStr; // %s\n
+    
+    llvm::Value *ScanfFormatStr;        // %lld
+    llvm::Value *ScanfFloatFormatStr;   // %lf
+    
+    llvm::Value *TrueStr;               // "TRUE"
+    llvm::Value *FalseStr;              // "FALSE"
 
     void SetupExternalFunctions();
     llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction, const std::string &VarName);

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string>
 #include <algorithm>
+#include <cstdlib>
 
 using namespace cps;
 
@@ -21,9 +22,12 @@ int Lexer::gettok() {
 
         if (IdentifierStr == "DECLARE") return tok_declare;
         if (IdentifierStr == "INTEGER") return tok_integer_kw;
-        if (IdentifierStr == "BOOLEAN") return tok_integer_kw; // TODO: implement real BOOLEAN
-        if (IdentifierStr == "REAL")    return tok_integer_kw; // TODO: implement real REAL
+        if (IdentifierStr == "BOOLEAN") return tok_boolean_kw; 
+        if (IdentifierStr == "REAL")    return tok_real_kw; 
         
+        if (IdentifierStr == "TRUE") return tok_true;
+        if (IdentifierStr == "FALSE") return tok_false;
+
         if (IdentifierStr == "INPUT") return tok_input;
         if (IdentifierStr == "OUTPUT") return tok_output;
         
@@ -47,6 +51,9 @@ int Lexer::gettok() {
         if (IdentifierStr == "ARRAY") return tok_array;
         if (IdentifierStr == "OF") return tok_of;
 
+        if (IdentifierStr == "DIV") return tok_div;
+        if (IdentifierStr == "MOD") return tok_mod;
+
         if (IdentifierStr == "FUNCTION") return tok_function;
         if (IdentifierStr == "ENDFUNCTION") return tok_endfunction;
         if (IdentifierStr == "PROCEDURE") return tok_procedure;
@@ -63,12 +70,24 @@ int Lexer::gettok() {
 
     if (isdigit(LastChar)) {
         std::string NumStr;
+        bool isReal = false;
         do {
             NumStr += LastChar;
             LastChar = getchar();
+            if (LastChar == '.' && !isReal) {
+                isReal = true;
+                NumStr += '.';
+                LastChar = getchar();
+            }
         } while (isdigit(LastChar));
-        NumVal = strtoll(NumStr.c_str(), nullptr, 10);
-        return tok_number;
+        
+        if (isReal) {
+            RealVal = strtod(NumStr.c_str(), nullptr);
+            return tok_number_real;
+        } else {
+            NumVal = strtoll(NumStr.c_str(), nullptr, 10);
+            return tok_number_int;
+        }
     }
 
     if (LastChar == '<') {
