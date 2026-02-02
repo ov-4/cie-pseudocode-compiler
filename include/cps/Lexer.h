@@ -36,6 +36,10 @@ enum Token {
     tok_boolean_kw = -22,
     tok_true = -23,
     tok_false = -24,
+    
+    tok_and = -25,
+    tok_or = -26,
+    tok_not = -27,
 
     tok_identifier = -100,
     tok_number_int = -101,

@@ -105,6 +105,21 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         return Arrays->emitArrayAccess(ArrAcc, *this);
     }
 
+    if (auto *Unary = dynamic_cast<UnaryExprAST*>(Expr)) {
+        Value *Operand = emitExpr(Unary->getOperand());
+        if (!Operand) return nullptr;
+        
+        if (Unary->getOp() == tok_not) {
+            if (Operand->getType()->isIntegerTy(64)) {
+                Operand = Builder->CreateICmpNE(Operand, ConstantInt::get(*TheContext, APInt(64, 0)), "tobool");
+            } else if (Operand->getType()->isDoubleTy()) {
+                Operand = Builder->CreateFCmpONE(Operand, ConstantFP::get(*TheContext, APFloat(0.0)), "tobool");
+            }
+            
+            return Builder->CreateNot(Operand, "nottmp");
+        }
+    }
+
     if (auto *Bin = dynamic_cast<BinaryExprAST*>(Expr)) {
         Value *L = emitExpr(Bin->getLHS());
         Value *R = emitExpr(Bin->getRHS());
@@ -385,6 +400,11 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
             if (AI->getAllocatedType() == Type::getDoubleTy(*TheContext) && Val->getType()->isIntegerTy(64)) {
                 Val = Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext));
             }
+            
+            if (AI->getAllocatedType() == Type::getInt64Ty(*TheContext) && Val->getType()->isIntegerTy(1)) {
+                 Val = Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext));
+            }
+
             Builder->CreateStore(Val, Alloca);
         }
     }

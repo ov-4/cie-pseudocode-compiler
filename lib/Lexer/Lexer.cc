@@ -53,6 +53,10 @@ int Lexer::gettok() {
 
         if (IdentifierStr == "DIV") return tok_div;
         if (IdentifierStr == "MOD") return tok_mod;
+        
+        if (IdentifierStr == "AND") return tok_and;
+        if (IdentifierStr == "OR") return tok_or;
+        if (IdentifierStr == "NOT") return tok_not;
 
         if (IdentifierStr == "FUNCTION") return tok_function;
         if (IdentifierStr == "ENDFUNCTION") return tok_endfunction;

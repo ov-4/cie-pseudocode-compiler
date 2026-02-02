@@ -6,6 +6,9 @@ using namespace cps;
 Parser::Parser(Lexer &L) : Lex(L) {
     getNextToken();
 
+    BinopPrecedence[tok_or] = 3;
+    BinopPrecedence[tok_and] = 5;
+
     BinopPrecedence[tok_eq] = 10;
     BinopPrecedence[tok_ne] = 10;
     BinopPrecedence[tok_le] = 10;
@@ -40,7 +43,6 @@ std::unique_ptr<ExprAST> Parser::ParseNumberExpr() {
         getNextToken();
         return Result;
     }
-    // Default to Int
     auto Result = std::make_unique<IntegerExprAST>(Lex.NumVal);
     getNextToken();
     return Result;
@@ -126,6 +128,16 @@ std::unique_ptr<ExprAST> Parser::ParsePrimary() {
     }
 }
 
+std::unique_ptr<ExprAST> Parser::ParseUnary() {
+    if (CurTok == tok_not) {
+        getNextToken();
+        auto Operand = ParseUnary();
+        if (!Operand) return nullptr;
+        return std::make_unique<UnaryExprAST>(tok_not, std::move(Operand));
+    }
+    return ParsePrimary();
+}
+
 std::unique_ptr<ExprAST> Parser::ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS) {
     while (true) {
         int TokPrec = GetTokPrecedence();
@@ -135,7 +147,7 @@ std::unique_ptr<ExprAST> Parser::ParseBinOpRHS(int ExprPrec, std::unique_ptr<Exp
         int Line = Lex.getLine();
         getNextToken();
 
-        auto RHS = ParsePrimary();
+        auto RHS = ParseUnary();
         if (!RHS) return nullptr;
 
         int NextPrec = GetTokPrecedence();
@@ -149,7 +161,7 @@ std::unique_ptr<ExprAST> Parser::ParseBinOpRHS(int ExprPrec, std::unique_ptr<Exp
 }
 
 std::unique_ptr<ExprAST> Parser::ParseExpression() {
-    auto LHS = ParsePrimary();
+    auto LHS = ParseUnary();
     if (!LHS) return nullptr;
     return ParseBinOpRHS(0, std::move(LHS));
 }

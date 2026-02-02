@@ -51,6 +51,16 @@ public:
     int getLine() const { return Line; }
 };
 
+class UnaryExprAST : public ExprAST {
+    int Op;
+    std::unique_ptr<ExprAST> Operand;
+public:
+    UnaryExprAST(int Op, std::unique_ptr<ExprAST> Operand)
+        : Op(Op), Operand(std::move(Operand)) {}
+    int getOp() const { return Op; }
+    ExprAST *getOperand() const { return Operand.get(); }
+};
+
 class BinaryExprAST : public ExprAST {
     int Op;
     std::unique_ptr<ExprAST> LHS, RHS;
