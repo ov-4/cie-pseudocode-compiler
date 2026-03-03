@@ -19,6 +19,7 @@ Parser::Parser(Lexer &L) : Lex(L) {
 
     BinopPrecedence['+'] = 20;
     BinopPrecedence['-'] = 20;
+    BinopPrecedence['&'] = 20;
     
     BinopPrecedence['*'] = 40;
     BinopPrecedence['/'] = 40;
@@ -148,6 +149,7 @@ std::unique_ptr<ExprAST> Parser::ParsePrimary() {
     case tok_length: return ParseStringBuiltin("LENGTH");
     case tok_mid:    return ParseStringBuiltin("MID");
     case tok_right:  return ParseStringBuiltin("RIGHT");
+    case tok_left:   return ParseStringBuiltin("LEFT");
     case tok_lcase:  return ParseStringBuiltin("LCASE");
     case tok_ucase:  return ParseStringBuiltin("UCASE");
 

@@ -15,15 +15,24 @@ int Lexer::gettok() {
         LastChar = getchar();
     }
 
-    if (LastChar == '"') {
+    if (LastChar == '"' || LastChar == '\'') {
+        char QuoteType = LastChar;
         StringVal = "";
+        
         LastChar = getchar();
-        while (LastChar != '"' && LastChar != EOF) {
+        
+        while (LastChar != QuoteType && LastChar != EOF && LastChar != '\n') {
             StringVal += LastChar;
             LastChar = getchar();
         }
-        if (LastChar == '"') LastChar = getchar();
-        return tok_string_literal;
+        
+        if (LastChar == QuoteType) {
+            LastChar = getchar();
+        } else {
+            fprintf(stderr, "Error: Unterminated string or char literal\n");
+        }
+
+        return tok_string_literal; 
     }
 
     if (isalpha(LastChar)) {
@@ -73,6 +82,7 @@ int Lexer::gettok() {
         if (IdentifierStr == "LENGTH") return tok_length;
         if (IdentifierStr == "MID") return tok_mid;
         if (IdentifierStr == "RIGHT") return tok_right;
+        if (IdentifierStr == "LEFT") return tok_left;
         if (IdentifierStr == "LCASE") return tok_lcase;
         if (IdentifierStr == "UCASE") return tok_ucase;
 

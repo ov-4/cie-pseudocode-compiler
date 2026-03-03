@@ -28,6 +28,8 @@ add_library(CPSCodeGen
     lib/CodeGen/BooleanHandler.cc
     lib/CodeGen/ArithmeticHandler.cc
     lib/CodeGen/StringHandler.cc
+    lib/CodeGen/CharHandler.cc
+    lib/CodeGen/StringConversionHandler.cc
 )
 
 llvm_map_components_to_libnames(llvm_libs core support native irreader)

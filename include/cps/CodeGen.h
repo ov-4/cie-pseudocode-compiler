@@ -11,6 +11,8 @@
 #include "cps/BooleanHandler.h"
 #include "cps/ArithmeticHandler.h"
 #include "cps/StringHandler.h"
+#include "cps/CharHandler.h"
+#include "cps/StringConversionHandler.h"
 
 #include <map>
 #include <memory>
@@ -34,6 +36,8 @@ class CodeGen {
     std::unique_ptr<BooleanHandler> BoolHandler;
     std::unique_ptr<ArithmeticHandler> ArithHandler;
     std::unique_ptr<StringHandler> StrHandler;
+    std::unique_ptr<CharHandler> ChrHandler;
+    std::unique_ptr<StringConversionHandler> StrConvHandler;
 
     llvm::FunctionCallee PrintfFunc;
     llvm::FunctionCallee ScanfFunc;

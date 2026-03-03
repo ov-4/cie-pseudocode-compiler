@@ -25,6 +25,8 @@ CodeGen::CodeGen() {
     BoolHandler = std::make_unique<BooleanHandler>(*TheContext, *Builder, *TheModule, NamedValues);
     ArithHandler = std::make_unique<ArithmeticHandler>(*TheContext, *Builder);
     StrHandler = std::make_unique<StringHandler>(*TheContext, *Builder, *TheModule, NamedValues);
+    ChrHandler = std::make_unique<CharHandler>(*TheContext, *Builder, *TheModule);
+    StrConvHandler = std::make_unique<StringConversionHandler>(*TheContext, *Builder, *TheModule);
 
     SetupExternalFunctions();
 }
@@ -151,6 +153,11 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
             return StrHandler->emitRight(emitExpr(Call->getArgs()[0].get()), 
                                          emitExpr(Call->getArgs()[1].get()));
         }
+        if (Name == "LEFT") {
+            if (Call->getArgs().size() != 2) { fprintf(stderr, "LEFT expects 2 args\n"); return nullptr; }
+            return StrHandler->emitLeft(emitExpr(Call->getArgs()[0].get()), 
+                                        emitExpr(Call->getArgs()[1].get()));
+        }
         if (Name == "LCASE") {
             if (Call->getArgs().size() != 1) { fprintf(stderr, "LCASE expects 1 arg\n"); return nullptr; }
             return StrHandler->emitLCase(emitExpr(Call->getArgs()[0].get()));
@@ -158,6 +165,36 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         if (Name == "UCASE") {
             if (Call->getArgs().size() != 1) { fprintf(stderr, "UCASE expects 1 arg\n"); return nullptr; }
             return StrHandler->emitUCase(emitExpr(Call->getArgs()[0].get()));
+        }
+        if (Name == "ASC") {
+            if (Call->getArgs().size() != 1) return nullptr;
+            Value *StrPtr = emitExpr(Call->getArgs()[0].get());
+            Value *CharVal = Builder->CreateLoad(Type::getInt8Ty(*TheContext), StrPtr, "char_load");
+            return ChrHandler->emitAsc(CharVal);
+        }
+        if (Name == "CHR") {
+            if (Call->getArgs().size() != 1) return nullptr;
+            Value *CharVal = ChrHandler->emitChr(emitExpr(Call->getArgs()[0].get()));
+            Function *MallocF = TheModule->getFunction("malloc");
+            Value *Mem = Builder->CreateCall(MallocF, ConstantInt::get(*TheContext, APInt(64, 2)));
+            Builder->CreateStore(CharVal, Mem);
+            Value *NullPtr = Builder->CreateInBoundsGEP(Type::getInt8Ty(*TheContext), Mem, ConstantInt::get(*TheContext, APInt(64, 1)));
+            Builder->CreateStore(ConstantInt::get(Type::getInt8Ty(*TheContext), 0), NullPtr);
+            return Mem;
+        }
+        if (Name == "IS_NUM") {
+            if (Call->getArgs().size() != 1) return nullptr;
+            return StrConvHandler->emitIsNum(emitExpr(Call->getArgs()[0].get()));
+        }
+        if (Name == "NUM_TO_STR") {
+            if (Call->getArgs().size() != 1) return nullptr;
+            Value *NumV = emitExpr(Call->getArgs()[0].get());
+            bool isReal = NumV->getType()->isDoubleTy();
+            return StrConvHandler->emitNumToStr(NumV, isReal);
+        }
+        if (Name == "STR_TO_NUM") {
+            if (Call->getArgs().size() != 1) return nullptr;
+            return StrConvHandler->emitStrToNum(emitExpr(Call->getArgs()[0].get()), true);
         }
 
         Function *CalleeF = TheModule->getFunction(Call->getCallee());
@@ -431,6 +468,10 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
             
             if (AI->getAllocatedType() == Type::getDoubleTy(*TheContext) && Val->getType()->isIntegerTy(64)) {
                 Val = Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext));
+            }
+
+            if (AI->getAllocatedType() == Type::getInt64Ty(*TheContext) && Val->getType()->isDoubleTy()) {
+                Val = Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "double_to_int");
             }
             
             if (AI->getAllocatedType() == Type::getInt64Ty(*TheContext) && Val->getType()->isIntegerTy(1)) {

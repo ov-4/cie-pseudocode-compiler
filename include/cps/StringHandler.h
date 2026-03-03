@@ -31,6 +31,7 @@ public:
     llvm::Value *emitLength(llvm::Value *Str);
     llvm::Value *emitMid(llvm::Value *Str, llvm::Value *Start, llvm::Value *Len);
     llvm::Value *emitRight(llvm::Value *Str, llvm::Value *Len);
+    llvm::Value *emitLeft(llvm::Value *Str, llvm::Value *Len);
     llvm::Value *emitLCase(llvm::Value *Str);
     llvm::Value *emitUCase(llvm::Value *Str);
 };

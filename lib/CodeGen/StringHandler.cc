@@ -112,6 +112,35 @@ Value *StringHandler::emitRight(Value *Str, Value *Len) {
     return NewStrMem;
 }
 
+Value *StringHandler::emitLeft(Value *Str, Value *Len) {
+    Value *FullLen = emitLength(Str);
+    if (Len->getType()->isIntegerTy() && Len->getType()->getIntegerBitWidth() != 64) {
+        Len = Builder.CreateSExt(Len, Type::getInt64Ty(Context), "len_ext");
+    } 
+    else if (Len->getType()->isDoubleTy()) {
+        Len = Builder.CreateFPToSI(Len, Type::getInt64Ty(Context), "len_int");
+    }
+
+    Value *Zero = ConstantInt::get(Context, APInt(64, 0));
+    Value *IsNeg = Builder.CreateICmpSLT(Len, Zero);
+    Value *SafeLen = Builder.CreateSelect(IsNeg, Zero, Len);
+
+    Value *IsTooBig = Builder.CreateICmpSGT(SafeLen, FullLen);
+    Value *ActualLen = Builder.CreateSelect(IsTooBig, FullLen, SafeLen);
+
+    Value *One = ConstantInt::get(Context, APInt(64, 1));
+    Value *AllocSize = Builder.CreateAdd(ActualLen, One);
+    Value *NewStrMem = Builder.CreateCall(MallocFunc, AllocSize, "left_str_mem");
+
+    std::vector<Value*> Args = {NewStrMem, Str, ActualLen};
+    Builder.CreateCall(MemCpyFunc, Args);
+
+    Value *NullTermPtr = Builder.CreateInBoundsGEP(Type::getInt8Ty(Context), NewStrMem, ActualLen);
+    Builder.CreateStore(ConstantInt::get(Type::getInt8Ty(Context), 0), NullTermPtr);
+
+    return NewStrMem;
+}
+
 Value *StringHandler::emitLCase(Value *Str) {
     Value *Len = emitLength(Str);
     Value *One = ConstantInt::get(Context, APInt(64, 1));

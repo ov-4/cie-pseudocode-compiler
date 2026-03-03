@@ -48,6 +48,7 @@ enum Token {
     tok_lcase = -34,
     tok_ucase = -35,
     tok_string_literal = -36,
+    tok_left = -37,
 
     tok_identifier = -100,
     tok_number_int = -101,
