@@ -4,6 +4,8 @@
 #include "llvm/IR/Module.h"
 #include "cps/AST.h"
 #include "cps/RuntimeCheck.h"
+#include "cps/TypeSystem.h"
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -11,11 +13,13 @@
 namespace cps {
 
 struct ArrayMetadata {
-    int Rank;
-    llvm::Type* ElementType;
+    int Rank = 0;
+    std::string ElementTypeName;
+    llvm::Type *ElementType = nullptr;
+    uint64_t ElementSize = 0;
     std::vector<llvm::Value*> LowerBounds;
     std::vector<llvm::Value*> UpperBounds;
-    std::vector<llvm::Value*> Multipliers; 
+    std::vector<llvm::Value*> Multipliers;
 };
 
 class CodeGen;
@@ -25,6 +29,8 @@ class ArrayHandler {
     llvm::IRBuilder<> *Builder;
     llvm::Module *TheModule;
     std::map<std::string, llvm::Value*> *NamedValues;
+    std::map<std::string, SymbolInfo> *Symbols;
+    TypeSystem &Types;
 
     std::map<std::string, ArrayMetadata> ArrayTable;
     RuntimeCheck &RuntimeChecker;
@@ -32,22 +38,31 @@ class ArrayHandler {
     llvm::FunctionCallee MallocFunc;
     llvm::FunctionCallee FreeFunc;
 
-    llvm::Value* computeFlatIndex(const std::string &Name, const std::vector<llvm::Value*> &Indices);
-    
-    void emitPrintLoop(const std::string &Name, int CurrentDim, std::vector<llvm::Value*> CurrentIndices, llvm::FunctionCallee PrintfFunc, llvm::Value* FmtStr);
+    llvm::Value *computeFlatIndex(const std::string &Name, const std::vector<llvm::Value*> &Indices);
+    llvm::Value *getArrayBasePointer(const std::string &Name);
+    llvm::Value *getElementPointer(const std::string &Name, llvm::Value *Offset);
+    const ArrayMetadata *getMetadata(const std::string &Name) const;
+    void emitPrintLoop(const std::string &Name,
+                       int CurrentDim,
+                       std::vector<llvm::Value*> CurrentIndices,
+                       CodeGen &CG);
 
 public:
-    ArrayHandler(llvm::LLVMContext &C, llvm::IRBuilder<> &B, llvm::Module &M, std::map<std::string, llvm::Value*> &NV);
+    ArrayHandler(llvm::LLVMContext &C,
+                 llvm::IRBuilder<> &B,
+                 llvm::Module &M,
+                 std::map<std::string, llvm::Value*> &NV,
+                 std::map<std::string, SymbolInfo> &Sym,
+                 TypeSystem &TS,
+                 RuntimeCheck &RC);
 
     void setupExternalFunctions();
-    
+
     void emitArrayDeclare(ArrayDeclareStmtAST *Stmt, CodeGen &CG);
     void emitArrayAssign(ArrayAssignStmtAST *Stmt, CodeGen &CG);
-    ArrayHandler(llvm::LLVMContext &C, llvm::IRBuilder<> &B, llvm::Module &M, std::map<std::string, llvm::Value*> &NV, RuntimeCheck &RC);
-    
-    llvm::Value* emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG);
+    llvm::Value *emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG);
 
-    bool tryEmitArrayOutput(ExprAST *Expr, CodeGen &CG, llvm::FunctionCallee PrintfFunc, llvm::Value* FmtStr);
+    bool tryEmitArrayOutput(ExprAST *Expr, CodeGen &CG);
 };
 
-}
+} // namespace cps

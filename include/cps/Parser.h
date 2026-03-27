@@ -5,6 +5,7 @@
 #include <memory>
 #include <map>
 #include <tuple>
+#include <string>
 
 namespace cps {
 
@@ -25,6 +26,7 @@ class Parser {
     std::unique_ptr<ExprAST> ParseNumberExpr();
     std::unique_ptr<ExprAST> ParseIdentifierExpr();
     std::unique_ptr<ExprAST> ParseParenExpr();
+    std::string ParseTypeName(bool AllowVoid = false);
     
     std::unique_ptr<ExprAST> ParseStringBuiltin(const std::string &FuncName);
 

@@ -1,16 +1,17 @@
 #include "cps/FunctionGen.h"
 #include "llvm/IR/Verifier.h"
-#include <iostream>
+#include <cstdio>
 
 using namespace llvm;
 using namespace cps;
 
 Type *FunctionGen::getLLVMType(const std::string &TypeName) {
-    if (TypeName == "INTEGER") return Type::getInt64Ty(Context);
-    if (TypeName == "BOOLEAN") return Type::getInt1Ty(Context);
-    if (TypeName == "REAL")    return Type::getDoubleTy(Context);
-    if (TypeName == "VOID")    return Type::getVoidTy(Context);
-    return Type::getInt64Ty(Context);
+    Type *Resolved = Types.getLLVMType(TypeName);
+    if (!Resolved) {
+        fprintf(stderr, "Error: Unknown type %s\n", TypeName.c_str());
+        return Type::getInt64Ty(Context);
+    }
+    return Resolved;
 }
 
 void FunctionGen::createArgumentAllocas(Function *F, const std::vector<std::tuple<std::string, std::string, bool>> &Args) {
@@ -19,20 +20,23 @@ void FunctionGen::createArgumentAllocas(Function *F, const std::vector<std::tupl
         std::string ArgName = std::get<0>(Args[Idx]);
         std::string ArgTypeStr = std::get<1>(Args[Idx]);
         bool IsRef = std::get<2>(Args[Idx]);
-        
+
         Value *ArgVal = &(*AI);
         ArgVal->setName(ArgName);
 
         if (IsRef) {
             NamedValues[ArgName] = ArgVal;
-        } else {
-            Type *ArgType = getLLVMType(ArgTypeStr);
-            IRBuilder<> TmpB(&F->getEntryBlock(), F->getEntryBlock().begin());
-            AllocaInst *Alloca = TmpB.CreateAlloca(ArgType, nullptr, ArgName);
-            
-            Builder.CreateStore(ArgVal, Alloca);
-            NamedValues[ArgName] = Alloca; 
+            Symbols[ArgName] = {ArgVal, ArgTypeStr, false};
+            continue;
         }
+
+        Type *ArgType = getLLVMType(ArgTypeStr);
+        IRBuilder<> TmpB(&F->getEntryBlock(), F->getEntryBlock().begin());
+        AllocaInst *Alloca = TmpB.CreateAlloca(ArgType, nullptr, ArgName);
+
+        Builder.CreateStore(ArgVal, Alloca);
+        NamedValues[ArgName] = Alloca;
+        Symbols[ArgName] = {Alloca, ArgTypeStr, false};
     }
 }
 
@@ -48,23 +52,28 @@ Function *FunctionGen::emitPrototype(PrototypeAST *Proto) {
 
     Type *RetType = getLLVMType(Proto->getReturnType());
     FunctionType *FT = FunctionType::get(RetType, ArgTypes, false);
-    Function *F = Function::Create(FT, Function::ExternalLinkage, Proto->getName(), &Module);
+    Function *F = Module.getFunction(Proto->getName());
+    if (!F) {
+        F = Function::Create(FT, Function::ExternalLinkage, Proto->getName(), &Module);
+    }
 
     unsigned Idx = 0;
     for (auto &Arg : F->args()) {
-        if (Idx < Proto->getArgs().size())
+        if (Idx < Proto->getArgs().size()) {
             Arg.setName(std::get<0>(Proto->getArgs()[Idx++]));
+        }
     }
     return F;
 }
 
-Function *FunctionGen::emitFunctionDef(FunctionDefAST *FuncAST, 
+Function *FunctionGen::emitFunctionDef(FunctionDefAST *FuncAST,
                                        const std::function<void(StmtAST*)> &StmtEmitter) {
     PrototypeAST *Proto = FuncAST->getProto();
     Function *TheFunction = Module.getFunction(Proto->getName());
 
-    if (!TheFunction)
+    if (!TheFunction) {
         TheFunction = emitPrototype(Proto);
+    }
 
     if (!TheFunction) return nullptr;
     if (!TheFunction->empty()) {
@@ -76,8 +85,10 @@ Function *FunctionGen::emitFunctionDef(FunctionDefAST *FuncAST,
     Builder.SetInsertPoint(BB);
 
     std::map<std::string, llvm::Value*> OldNamedValues = NamedValues;
+    std::map<std::string, SymbolInfo> OldSymbols = Symbols;
     NamedValues.clear();
-    
+    Symbols.clear();
+
     createArgumentAllocas(TheFunction, Proto->getArgs());
 
     for (const auto &Stmt : FuncAST->getBody()) {
@@ -85,19 +96,24 @@ Function *FunctionGen::emitFunctionDef(FunctionDefAST *FuncAST,
     }
 
     if (!Builder.GetInsertBlock()->getTerminator()) {
-        if (Proto->getReturnType() == "VOID")
+        if (Proto->getReturnType() == "VOID") {
             Builder.CreateRetVoid();
-        else
+        } else {
             Builder.CreateRet(Constant::getNullValue(TheFunction->getReturnType()));
+        }
     }
 
     verifyFunction(*TheFunction);
     NamedValues = OldNamedValues;
+    Symbols = OldSymbols;
     return TheFunction;
 }
 
-static Value *GenerateCall(llvm::Module &Module, llvm::IRBuilder<> &Builder, llvm::LLVMContext &Context,
-                    const std::string &CalleeName, const std::vector<llvm::Value*> &Args) {
+static Value *GenerateCall(llvm::Module &Module,
+                           llvm::IRBuilder<> &Builder,
+                           llvm::LLVMContext &Context,
+                           const std::string &CalleeName,
+                           const std::vector<llvm::Value*> &Args) {
     Function *CalleeF = Module.getFunction(CalleeName);
     if (!CalleeF) {
         std::vector<Type*> ArgTypes;

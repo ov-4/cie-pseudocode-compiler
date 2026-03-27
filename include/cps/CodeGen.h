@@ -5,6 +5,7 @@
 #include "cps/AST.h"
 #include "cps/RuntimeCheck.h"
 #include "cps/FunctionGen.h"
+#include "cps/TypeSystem.h"
 
 #include "cps/IntegerHandler.h"
 #include "cps/RealHandler.h"
@@ -16,6 +17,7 @@
 
 #include <map>
 #include <memory>
+#include <string>
 
 namespace cps {
 
@@ -26,6 +28,8 @@ class CodeGen {
     std::unique_ptr<llvm::Module> TheModule;
     std::unique_ptr<llvm::IRBuilder<>> Builder;
     std::map<std::string, llvm::Value*> NamedValues;
+    std::map<std::string, SymbolInfo> Symbols;
+    std::unique_ptr<TypeSystem> Types;
     
     std::unique_ptr<ArrayHandler> Arrays;
     std::unique_ptr<RuntimeCheck> RuntimeChecker;
@@ -45,6 +49,7 @@ class CodeGen {
     llvm::Value *PrintfFormatStr;       // %lld\n
     llvm::Value *PrintfFloatFormatStr;  // %f\n
     llvm::Value *PrintfStringFormatStr; // %s\n
+    llvm::Value *PrintfCharFormatStr;   // %c\n
     
     llvm::Value *ScanfFormatStr;        // %lld
     llvm::Value *ScanfFloatFormatStr;   // %lf
@@ -52,9 +57,18 @@ class CodeGen {
     
     llvm::Value *TrueStr;               // "TRUE"
     llvm::Value *FalseStr;              // "FALSE"
+    llvm::Value *EmptyStringStr;        // ""
 
     void SetupExternalFunctions();
     llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction, const std::string &VarName);
+    llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction, llvm::Type *AllocType, const std::string &VarName);
+
+    void registerSymbol(const std::string &Name, llvm::Value *Storage, const std::string &TypeName, bool IsArray = false);
+    const SymbolInfo *getSymbolInfo(const std::string &Name) const;
+    const TypeInfo *getExprTypeInfo(ExprAST *Expr) const;
+    llvm::Value *coerceValueToType(llvm::Value *Val, const TypeInfo *TargetInfo);
+    void emitDeclareStmt(DeclareStmtAST *Stmt);
+    void emitOutputValue(llvm::Value *Val, const TypeInfo *TypeInfo, bool AppendNewline = true);
 
     void emitIfStmt(IfStmtAST *Stmt);
     void emitWhileStmt(WhileStmtAST *Stmt);
@@ -69,6 +83,10 @@ public:
     
     llvm::Value *emitExpr(ExprAST *Expr);
     void emitStmt(StmtAST *Stmt);
+
+    const TypeInfo *resolveType(const std::string &TypeName) const;
+    llvm::Type *getLLVMType(const std::string &TypeName) const;
+    llvm::Value *getNamedValue(const std::string &Name) const;
     
     friend class ArrayHandler;
 };

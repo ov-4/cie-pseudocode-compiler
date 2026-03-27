@@ -1,22 +1,35 @@
 #include "cps/ArrayHandler.h"
 #include "cps/CodeGen.h"
-#include "llvm/IR/Type.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Type.h"
+#include <cstdio>
 
 using namespace llvm;
 using namespace cps;
 
-ArrayHandler::ArrayHandler(LLVMContext &C, IRBuilder<> &B, Module &M, std::map<std::string, Value*> &NV, RuntimeCheck &RC)
-    : TheContext(&C), Builder(&B), TheModule(&M), NamedValues(&NV), RuntimeChecker(RC) {
+ArrayHandler::ArrayHandler(LLVMContext &C,
+                           IRBuilder<> &B,
+                           Module &M,
+                           std::map<std::string, Value*> &NV,
+                           std::map<std::string, SymbolInfo> &Sym,
+                           TypeSystem &TS,
+                           RuntimeCheck &RC)
+    : TheContext(&C),
+      Builder(&B),
+      TheModule(&M),
+      NamedValues(&NV),
+      Symbols(&Sym),
+      Types(TS),
+      RuntimeChecker(RC) {
     setupExternalFunctions();
 }
 
 void ArrayHandler::setupExternalFunctions() {
     std::vector<Type*> MallocArgs;
     MallocArgs.push_back(Type::getInt64Ty(*TheContext));
-    
+
     FunctionType *MallocType = FunctionType::get(PointerType::getUnqual(*TheContext), MallocArgs, false);
     MallocFunc = TheModule->getOrInsertFunction("malloc", MallocType);
 
@@ -26,89 +39,124 @@ void ArrayHandler::setupExternalFunctions() {
     FreeFunc = TheModule->getOrInsertFunction("free", FreeType);
 }
 
-void ArrayHandler::emitArrayDeclare(ArrayDeclareStmtAST *Stmt, CodeGen &CG) {
-    std::string Name = Stmt->getName();
-    int Rank = Stmt->getBounds().size();
-    
-    std::vector<Value*> Lows, Highs, Dims;
-    Value *TotalElements = ConstantInt::get(*TheContext, APInt(64, 1));
-    
-    for (const auto &Pair : Stmt->getBounds()) {
-        Value *L = CG.emitExpr(Pair.first.get());
-        Value *R = CG.emitExpr(Pair.second.get());
-        
-        if (!L || !R) return;
-        
-        Value *L64 = Builder->CreateSExt(L, Type::getInt64Ty(*TheContext));
-        Value *R64 = Builder->CreateSExt(R, Type::getInt64Ty(*TheContext));
-        
-        Lows.push_back(L);
-        Highs.push_back(R);
-        
-        Value *Diff = Builder->CreateSub(R64, L64);
-        Value *DimSize = Builder->CreateAdd(Diff, ConstantInt::get(*TheContext, APInt(64, 1)));
-        Dims.push_back(DimSize);
-        
-        TotalElements = Builder->CreateMul(TotalElements, DimSize);
+const ArrayMetadata *ArrayHandler::getMetadata(const std::string &Name) const {
+    auto It = ArrayTable.find(Name);
+    if (It == ArrayTable.end()) {
+        return nullptr;
     }
-    
-    std::vector<Value*> Multipliers(Rank);
-    Multipliers[Rank - 1] = ConstantInt::get(*TheContext, APInt(64, 1));
-    
-    for (int i = Rank - 2; i >= 0; --i) {
-        Value *NextMult = Multipliers[i+1];
-        Value *NextDimSize = Dims[i+1];
-        Multipliers[i] = Builder->CreateMul(NextMult, NextDimSize);
-    }
-
-    ArrayMetadata Meta;
-    Meta.Rank = Rank;
-    Meta.ElementType = Type::getInt64Ty(*TheContext);
-    Meta.LowerBounds = Lows;
-    Meta.UpperBounds = Highs;
-    Meta.Multipliers = Multipliers;
-    ArrayTable[Name] = Meta;
-    
-
-    Value *ElemSize = ConstantInt::get(*TheContext, APInt(64, 8)); 
-    Value *TotalBytes = Builder->CreateMul(TotalElements, ElemSize);
-    
-    CallInst *Ptr = Builder->CreateCall(MallocFunc, TotalBytes);
-    
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
-    
-    AllocaInst *Alloca = TmpB.CreateAlloca(PointerType::getUnqual(*TheContext), nullptr, Name);
-    
-    Builder->CreateStore(Ptr, Alloca);
-    (*NamedValues)[Name] = Alloca;
+    return &It->second;
 }
 
-Value* ArrayHandler::computeFlatIndex(const std::string &Name, const std::vector<Value*> &Indices) {
-    if (ArrayTable.find(Name) == ArrayTable.end()) return nullptr;
-    const auto &Meta = ArrayTable[Name];
-    
+Value *ArrayHandler::computeFlatIndex(const std::string &Name, const std::vector<Value*> &Indices) {
+    const ArrayMetadata *Meta = getMetadata(Name);
+    if (!Meta) return nullptr;
+
     Value *Offset = ConstantInt::get(*TheContext, APInt(64, 0));
-    
     for (size_t i = 0; i < Indices.size(); ++i) {
         Value *Idx = Indices[i];
-        Value *Lower = Meta.LowerBounds[i];
+        Value *Lower = Meta->LowerBounds[i];
         Value *Diff = Builder->CreateSub(Idx, Lower);
-        Value *Term = Builder->CreateMul(Diff, Meta.Multipliers[i]);
+        Value *Term = Builder->CreateMul(Diff, Meta->Multipliers[i]);
         Offset = Builder->CreateAdd(Offset, Term);
     }
     return Offset;
 }
 
-Value* ArrayHandler::emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG) {
+Value *ArrayHandler::getArrayBasePointer(const std::string &Name) {
+    auto It = NamedValues->find(Name);
+    if (It == NamedValues->end() || !It->second) {
+        return nullptr;
+    }
+    return Builder->CreateLoad(PointerType::getUnqual(*TheContext), It->second, (Name + "_raw").c_str());
+}
+
+Value *ArrayHandler::getElementPointer(const std::string &Name, Value *Offset) {
+    const ArrayMetadata *Meta = getMetadata(Name);
+    if (!Meta || !Offset) return nullptr;
+
+    Value *RawPtr = getArrayBasePointer(Name);
+    if (!RawPtr) return nullptr;
+
+    PointerType *TypedPtrTy = PointerType::getUnqual(Meta->ElementType);
+    Value *TypedPtr = Builder->CreateBitCast(RawPtr, TypedPtrTy, Name + "_typed_ptr");
+    return Builder->CreateGEP(Meta->ElementType, TypedPtr, Offset, Name + "_elem_ptr");
+}
+
+void ArrayHandler::emitArrayDeclare(ArrayDeclareStmtAST *Stmt, CodeGen &CG) {
+    std::string Name = Stmt->getName();
+    int Rank = static_cast<int>(Stmt->getBounds().size());
+
+    const TypeInfo *ElemInfo = Types.resolve(Stmt->getType());
+    if (!ElemInfo || !ElemInfo->LLVMType || ElemInfo->isVoid()) {
+        fprintf(stderr, "Error: Unknown array element type %s\n", Stmt->getType().c_str());
+        return;
+    }
+
+    std::vector<Value*> Lows;
+    std::vector<Value*> Highs;
+    std::vector<Value*> Dims;
+    Value *TotalElements = ConstantInt::get(*TheContext, APInt(64, 1));
+
+    for (const auto &Pair : Stmt->getBounds()) {
+        Value *L = CG.emitExpr(Pair.first.get());
+        Value *R = CG.emitExpr(Pair.second.get());
+        L = CG.coerceValueToType(L, CG.resolveType("INTEGER"));
+        R = CG.coerceValueToType(R, CG.resolveType("INTEGER"));
+
+        if (!L || !R) return;
+
+        Lows.push_back(L);
+        Highs.push_back(R);
+
+        Value *Diff = Builder->CreateSub(R, L, Name + "_dim_diff");
+        Value *DimSize = Builder->CreateAdd(Diff, ConstantInt::get(*TheContext, APInt(64, 1)), Name + "_dim_size");
+        Dims.push_back(DimSize);
+        TotalElements = Builder->CreateMul(TotalElements, DimSize, Name + "_total_elems");
+    }
+
+    std::vector<Value*> Multipliers(Rank);
+    Multipliers[Rank - 1] = ConstantInt::get(*TheContext, APInt(64, 1));
+    for (int i = Rank - 2; i >= 0; --i) {
+        Multipliers[i] = Builder->CreateMul(Multipliers[i + 1], Dims[i + 1], Name + "_mult");
+    }
+
+    ArrayMetadata Meta;
+    Meta.Rank = Rank;
+    Meta.ElementTypeName = ElemInfo->Name;
+    Meta.ElementType = ElemInfo->LLVMType;
+    Meta.ElementSize = ElemInfo->ElementSize;
+    Meta.LowerBounds = std::move(Lows);
+    Meta.UpperBounds = std::move(Highs);
+    Meta.Multipliers = std::move(Multipliers);
+    ArrayTable[Name] = Meta;
+
+    Value *ElemSize = ConstantInt::get(*TheContext, APInt(64, ElemInfo->ElementSize));
+    Value *TotalBytes = Builder->CreateMul(TotalElements, ElemSize, Name + "_total_bytes");
+    CallInst *Ptr = Builder->CreateCall(MallocFunc, TotalBytes, Name + "_malloc");
+
+    FunctionType *MemsetType = FunctionType::get(PointerType::getUnqual(*TheContext),
+                                                 {PointerType::getUnqual(*TheContext), Type::getInt32Ty(*TheContext), Type::getInt64Ty(*TheContext)},
+                                                 false);
+    FunctionCallee MemsetFunc = TheModule->getOrInsertFunction("memset", MemsetType);
+    Builder->CreateCall(MemsetFunc,
+                        {Ptr, ConstantInt::get(Type::getInt32Ty(*TheContext), 0), TotalBytes});
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    AllocaInst *Alloca = CG.CreateEntryBlockAlloca(TheFunction, PointerType::getUnqual(*TheContext), Name);
+    Builder->CreateStore(Ptr, Alloca);
+
+    CG.registerSymbol(Name, Alloca, ElemInfo->Name, true);
+}
+
+Value *ArrayHandler::emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG) {
     std::string Name = Expr->getName();
-    if (ArrayTable.find(Name) == ArrayTable.end()) {
+    const ArrayMetadata *Meta = getMetadata(Name);
+    if (!Meta) {
         fprintf(stderr, "Error: Undeclared array %s\n", Name.c_str());
         return nullptr;
     }
-    
-    const auto &Meta = ArrayTable[Name];
-    if (Expr->getIndices().size() != Meta.Rank) {
+
+    if (Expr->getIndices().size() != static_cast<size_t>(Meta->Rank)) {
         fprintf(stderr, "Error: Incorrect number of indices for %s\n", Name.c_str());
         return nullptr;
     }
@@ -116,125 +164,147 @@ Value* ArrayHandler::emitArrayAccess(ArrayAccessExprAST *Expr, CodeGen &CG) {
     std::vector<Value*> Indices;
     for (size_t i = 0; i < Expr->getIndices().size(); ++i) {
         Value *Idx = CG.emitExpr(Expr->getIndices()[i].get());
-        Indices.push_back(Idx);
+        Idx = CG.coerceValueToType(Idx, CG.resolveType("INTEGER"));
+        if (!Idx) return nullptr;
 
-        Value *Lower = Meta.LowerBounds[i];
-        Value *Upper = Meta.UpperBounds[i];
-        RuntimeChecker.emitIndexCheck(Idx, Lower, Upper, Expr->getLine());
+        Indices.push_back(Idx);
+        RuntimeChecker.emitIndexCheck(Idx, Meta->LowerBounds[i], Meta->UpperBounds[i], Expr->getLine());
     }
-    
+
     Value *Offset = computeFlatIndex(Name, Indices);
-    
-    Value *Alloca = (*NamedValues)[Name];
-    Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
-    Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
-    Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);
-    
-    return Builder->CreateLoad(Type::getInt64Ty(*TheContext), ElemPtr);
+    Value *ElemPtr = getElementPointer(Name, Offset);
+    if (!ElemPtr) return nullptr;
+
+    Value *Val = Builder->CreateLoad(Meta->ElementType, ElemPtr, Name + "_elem");
+    if (Meta->ElementTypeName == "STRING") {
+        Value *IsNull = Builder->CreateICmpEQ(Val,
+                                              ConstantPointerNull::get(cast<PointerType>(Meta->ElementType)),
+                                              Name + "_str_is_null");
+        Val = Builder->CreateSelect(IsNull, CG.EmptyStringStr, Val, Name + "_safe_str");
+    }
+    return Val;
 }
 
 void ArrayHandler::emitArrayAssign(ArrayAssignStmtAST *Stmt, CodeGen &CG) {
     std::string Name = Stmt->getName();
-    if (ArrayTable.find(Name) == ArrayTable.end()) {
+    const ArrayMetadata *Meta = getMetadata(Name);
+    if (!Meta) {
         fprintf(stderr, "Error: Undeclared array %s\n", Name.c_str());
         return;
     }
-    
+
+    if (Stmt->getIndices().size() != static_cast<size_t>(Meta->Rank)) {
+        fprintf(stderr, "Error: Incorrect number of indices for %s\n", Name.c_str());
+        return;
+    }
+
     std::vector<Value*> Indices;
     for (size_t i = 0; i < Stmt->getIndices().size(); ++i) {
         Value *Idx = CG.emitExpr(Stmt->getIndices()[i].get());
-        Indices.push_back(Idx);
+        Idx = CG.coerceValueToType(Idx, CG.resolveType("INTEGER"));
+        if (!Idx) return;
 
-        const auto &Meta = ArrayTable[Name];
-        Value *Lower = Meta.LowerBounds[i];
-        Value *Upper = Meta.UpperBounds[i];
-        RuntimeChecker.emitIndexCheck(Idx, Lower, Upper, Stmt->getLine());
+        Indices.push_back(Idx);
+        RuntimeChecker.emitIndexCheck(Idx, Meta->LowerBounds[i], Meta->UpperBounds[i], Stmt->getLine());
     }
-    
+
+    const TypeInfo *ElemInfo = Types.resolve(Meta->ElementTypeName);
     Value *Val = CG.emitExpr(Stmt->getExpr());
+    Val = CG.coerceValueToType(Val, ElemInfo);
+    if (!Val) return;
+
     Value *Offset = computeFlatIndex(Name, Indices);
-    
-    Value *Alloca = (*NamedValues)[Name];
-    Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
-    Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
-    Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);
-    
+    Value *ElemPtr = getElementPointer(Name, Offset);
+    if (!ElemPtr) return;
+
     Builder->CreateStore(Val, ElemPtr);
 }
 
-bool ArrayHandler::tryEmitArrayOutput(ExprAST *Expr, CodeGen &CG, llvm::FunctionCallee PrintfFunc, llvm::Value* FmtStr) {
+bool ArrayHandler::tryEmitArrayOutput(ExprAST *Expr, CodeGen &CG) {
     std::string Name;
     std::vector<Value*> Indices;
-    
+
     if (auto *Var = dynamic_cast<VariableExprAST*>(Expr)) {
         Name = Var->getName();
-        if (ArrayTable.find(Name) == ArrayTable.end()) return false; 
-    } 
-    else if (auto *Acc = dynamic_cast<ArrayAccessExprAST*>(Expr)) {
+        if (!getMetadata(Name)) return false;
+    } else if (auto *Acc = dynamic_cast<ArrayAccessExprAST*>(Expr)) {
         Name = Acc->getName();
-        if (ArrayTable.find(Name) == ArrayTable.end()) return false;
-        
-        for (const auto &Idx : Acc->getIndices()) {
-            Indices.push_back(CG.emitExpr(Idx.get()));
+        const ArrayMetadata *Meta = getMetadata(Name);
+        if (!Meta) return false;
+
+        for (size_t i = 0; i < Acc->getIndices().size(); ++i) {
+            Value *Idx = CG.emitExpr(Acc->getIndices()[i].get());
+            Idx = CG.coerceValueToType(Idx, CG.resolveType("INTEGER"));
+            if (!Idx) return false;
+            Indices.push_back(Idx);
+            RuntimeChecker.emitIndexCheck(Idx, Meta->LowerBounds[i], Meta->UpperBounds[i], Acc->getLine());
+        }
+
+        if (Indices.size() > static_cast<size_t>(Meta->Rank)) {
+            fprintf(stderr, "Error: Incorrect number of indices for %s\n", Name.c_str());
+            return true;
         }
     } else {
         return false;
     }
-    
-    const auto &Meta = ArrayTable[Name];
-    
-    if (Indices.size() == Meta.Rank) {
+
+    const ArrayMetadata *Meta = getMetadata(Name);
+    if (!Meta) return false;
+    if (Indices.size() == static_cast<size_t>(Meta->Rank)) {
         return false;
     }
-    
-    emitPrintLoop(Name, Indices.size(), Indices, PrintfFunc, FmtStr);
+
+    emitPrintLoop(Name, static_cast<int>(Indices.size()), Indices, CG);
     return true;
 }
 
-void ArrayHandler::emitPrintLoop(const std::string &Name, int CurrentDim, std::vector<Value*> CurrentIndices, llvm::FunctionCallee PrintfFunc, llvm::Value* FmtStr) {
-    const auto &Meta = ArrayTable[Name];
-    
-    if (CurrentDim == Meta.Rank) {
+void ArrayHandler::emitPrintLoop(const std::string &Name,
+                                 int CurrentDim,
+                                 std::vector<Value*> CurrentIndices,
+                                 CodeGen &CG) {
+    const ArrayMetadata *Meta = getMetadata(Name);
+    if (!Meta) return;
+
+    if (CurrentDim == Meta->Rank) {
         Value *Offset = computeFlatIndex(Name, CurrentIndices);
-        
-        Value *Alloca = (*NamedValues)[Name];
-        Value *RawPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), Alloca);
-        Value *IntPtr = Builder->CreateBitCast(RawPtr, PointerType::getUnqual(*TheContext));
-        Value *ElemPtr = Builder->CreateGEP(Type::getInt64Ty(*TheContext), IntPtr, Offset);
-        Value *Val = Builder->CreateLoad(Type::getInt64Ty(*TheContext), ElemPtr);
-        
-        std::vector<Value*> Args;
-        Args.push_back(FmtStr);
-        Args.push_back(Val);
-        Builder->CreateCall(PrintfFunc, Args);
+        Value *ElemPtr = getElementPointer(Name, Offset);
+        if (!ElemPtr) return;
+
+        Value *Val = Builder->CreateLoad(Meta->ElementType, ElemPtr, Name + "_print_val");
+        if (Meta->ElementTypeName == "STRING") {
+            Value *IsNull = Builder->CreateICmpEQ(Val,
+                                                  ConstantPointerNull::get(cast<PointerType>(Meta->ElementType)),
+                                                  Name + "_print_str_is_null");
+            Val = Builder->CreateSelect(IsNull, CG.EmptyStringStr, Val, Name + "_print_safe_str");
+        }
+
+        CG.emitOutputValue(Val, Types.resolve(Meta->ElementTypeName), true);
         return;
     }
-    
+
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
     BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "arr_loop", TheFunction);
     BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "arr_after", TheFunction);
-    
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
-    AllocaInst *LoopVar = TmpB.CreateAlloca(Type::getInt64Ty(*TheContext), nullptr, "idx");
-    
-    Value *Start = Meta.LowerBounds[CurrentDim];
-    Value *End = Meta.UpperBounds[CurrentDim];
-    
+
+    AllocaInst *LoopVar = CG.CreateEntryBlockAlloca(TheFunction, Type::getInt64Ty(*TheContext), "idx");
+    Value *Start = Meta->LowerBounds[CurrentDim];
+    Value *End = Meta->UpperBounds[CurrentDim];
+
     Builder->CreateStore(Start, LoopVar);
     Builder->CreateBr(LoopBB);
-    
+
     Builder->SetInsertPoint(LoopBB);
     Value *CurVal = Builder->CreateLoad(Type::getInt64Ty(*TheContext), LoopVar);
-    
+
     std::vector<Value*> NextIndices = CurrentIndices;
     NextIndices.push_back(CurVal);
-    emitPrintLoop(Name, CurrentDim + 1, NextIndices, PrintfFunc, FmtStr);
-    
+    emitPrintLoop(Name, CurrentDim + 1, NextIndices, CG);
+
     Value *NextVal = Builder->CreateAdd(CurVal, ConstantInt::get(*TheContext, APInt(64, 1)));
     Builder->CreateStore(NextVal, LoopVar);
-    
+
     Value *Cond = Builder->CreateICmpSLE(NextVal, End);
     Builder->CreateCondBr(Cond, LoopBB, AfterBB);
-    
+
     Builder->SetInsertPoint(AfterBB);
 }

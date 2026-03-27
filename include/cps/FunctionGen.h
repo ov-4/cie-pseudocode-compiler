@@ -2,6 +2,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "cps/FunctionAST.h"
+#include "cps/TypeSystem.h"
 #include <map>
 #include <vector>
 #include <functional>
@@ -14,15 +15,21 @@ class FunctionGen {
     llvm::LLVMContext &Context;
     llvm::Module &Module;
     llvm::IRBuilder<> &Builder;
+    TypeSystem &Types;
     
     std::map<std::string, llvm::Value*> &NamedValues;
+    std::map<std::string, SymbolInfo> &Symbols;
 
     void createArgumentAllocas(llvm::Function *F, const std::vector<std::tuple<std::string, std::string, bool>> &Args);
 
 public:
-    FunctionGen(llvm::LLVMContext &C, llvm::Module &M, llvm::IRBuilder<> &B, 
-                std::map<std::string, llvm::Value*> &NV)
-        : Context(C), Module(M), Builder(B), NamedValues(NV) {}
+    FunctionGen(llvm::LLVMContext &C,
+                llvm::Module &M,
+                llvm::IRBuilder<> &B,
+                TypeSystem &TS,
+                std::map<std::string, llvm::Value*> &NV,
+                std::map<std::string, SymbolInfo> &Sym)
+        : Context(C), Module(M), Builder(B), Types(TS), NamedValues(NV), Symbols(Sym) {}
 
     llvm::Type *getLLVMType(const std::string &TypeName);
 

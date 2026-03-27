@@ -32,6 +32,13 @@ public:
     bool getVal() const { return Val; }
 };
 
+class CharExprAST : public ExprAST {
+    char Val;
+public:
+    CharExprAST(char Val) : Val(Val) {}
+    char getVal() const { return Val; }
+};
+
 class StringExprAST : public ExprAST {
     std::string Val;
 public:

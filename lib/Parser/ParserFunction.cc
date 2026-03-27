@@ -1,5 +1,6 @@
 #include "cps/Parser.h"
 #include "cps/FunctionAST.h"
+#include <cstdio>
 #include <tuple>
 
 using namespace cps;
@@ -34,15 +35,10 @@ std::vector<std::tuple<std::string, std::string, bool>> Parser::ParsePrototypeAr
         }
         getNextToken();
 
-        std::string Type = "INTEGER";
-        if (CurTok == tok_integer_kw) {
-            getNextToken();
-        } else if (CurTok == tok_identifier) {
-            Type = Lex.IdentifierStr; 
-            getNextToken();
-        } else {
-             fprintf(stderr, "Error: Expected type (e.g. INTEGER) for argument '%s'\n", Name.c_str());
-             return Args;
+        std::string Type = ParseTypeName(false);
+        if (Type.empty()) {
+            fprintf(stderr, "Error: Expected argument type for '%s'\n", Name.c_str());
+            return Args;
         }
 
         Args.emplace_back(Name, Type, IsRef);
@@ -58,18 +54,26 @@ std::vector<std::tuple<std::string, std::string, bool>> Parser::ParsePrototypeAr
     return Args;
 }
 
-
 std::unique_ptr<StmtAST> Parser::ParseFunction() {
     getNextToken();
+    if (CurTok != tok_identifier) {
+        fprintf(stderr, "Error: Expected function name\n");
+        return nullptr;
+    }
+
     std::string Name = Lex.IdentifierStr;
     getNextToken();
 
     auto Args = ParsePrototypeArgs();
 
     std::string RetType = "INTEGER";
-    if (CurTok == tok_returns) { 
+    if (CurTok == tok_returns) {
         getNextToken();
-        getNextToken();
+        RetType = ParseTypeName(true);
+        if (RetType.empty()) {
+            fprintf(stderr, "Error: Expected return type for function '%s'\n", Name.c_str());
+            return nullptr;
+        }
     }
 
     auto Proto = std::make_unique<PrototypeAST>(Name, std::move(Args), RetType);
@@ -80,6 +84,11 @@ std::unique_ptr<StmtAST> Parser::ParseFunction() {
         if (Stmt) Body.push_back(std::move(Stmt));
         else if (CurTok != tok_eof && CurTok != tok_endfunction) getNextToken();
     }
+
+    if (CurTok != tok_endfunction) {
+        fprintf(stderr, "Error: expected ENDFUNCTION\n");
+        return nullptr;
+    }
     getNextToken();
 
     return std::make_unique<FunctionDefAST>(std::move(Proto), std::move(Body));
@@ -87,6 +96,11 @@ std::unique_ptr<StmtAST> Parser::ParseFunction() {
 
 std::unique_ptr<StmtAST> Parser::ParseProcedure() {
     getNextToken();
+    if (CurTok != tok_identifier) {
+        fprintf(stderr, "Error: Expected procedure name\n");
+        return nullptr;
+    }
+
     std::string Name = Lex.IdentifierStr;
     getNextToken();
 
@@ -99,6 +113,11 @@ std::unique_ptr<StmtAST> Parser::ParseProcedure() {
         if (Stmt) Body.push_back(std::move(Stmt));
         else if (CurTok != tok_eof && CurTok != tok_endprocedure) getNextToken();
     }
+
+    if (CurTok != tok_endprocedure) {
+        fprintf(stderr, "Error: expected ENDPROCEDURE\n");
+        return nullptr;
+    }
     getNextToken();
 
     return std::make_unique<FunctionDefAST>(std::move(Proto), std::move(Body));
@@ -106,6 +125,11 @@ std::unique_ptr<StmtAST> Parser::ParseProcedure() {
 
 std::unique_ptr<StmtAST> Parser::ParseCallStmt() {
     getNextToken();
+    if (CurTok != tok_identifier) {
+        fprintf(stderr, "Error: Expected callee name after CALL\n");
+        return nullptr;
+    }
+
     std::string Callee = Lex.IdentifierStr;
     getNextToken();
 
@@ -115,6 +139,7 @@ std::unique_ptr<StmtAST> Parser::ParseCallStmt() {
         while (CurTok != ')') {
             auto Arg = ParseExpression();
             if (Arg) Args.push_back(std::move(Arg));
+            else return nullptr;
             
             if (CurTok == ')') break;
             if (CurTok != ',') {

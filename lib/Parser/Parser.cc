@@ -1,5 +1,6 @@
 #include "cps/Parser.h"
 #include "cps/FunctionAST.h"
+#include <cstdio>
 
 using namespace cps;
 
@@ -96,6 +97,41 @@ std::unique_ptr<ExprAST> Parser::ParseIdentifierExpr() {
     return std::make_unique<VariableExprAST>(IdName);
 }
 
+std::string Parser::ParseTypeName(bool AllowVoid) {
+    if (CurTok == tok_integer_kw) {
+        getNextToken();
+        return "INTEGER";
+    }
+    if (CurTok == tok_real_kw) {
+        getNextToken();
+        return "REAL";
+    }
+    if (CurTok == tok_boolean_kw) {
+        getNextToken();
+        return "BOOLEAN";
+    }
+    if (CurTok == tok_string_kw) {
+        getNextToken();
+        return "STRING";
+    }
+    if (CurTok == tok_char_kw) {
+        getNextToken();
+        return "CHAR";
+    }
+    if (CurTok == tok_identifier) {
+        std::string TypeName = Lex.IdentifierStr;
+        if (!AllowVoid && TypeName == "VOID") {
+            fprintf(stderr, "Error: VOID is not allowed here\n");
+            return "";
+        }
+        getNextToken();
+        return TypeName;
+    }
+
+    fprintf(stderr, "Error: Unknown type name\n");
+    return "";
+}
+
 std::unique_ptr<ExprAST> Parser::ParseStringBuiltin(const std::string &FuncName) {
     getNextToken();
     if (CurTok != '(') {
@@ -146,6 +182,11 @@ std::unique_ptr<ExprAST> Parser::ParsePrimary() {
         getNextToken();
         return Res;
     }
+    case tok_char_literal: {
+        auto Res = std::make_unique<CharExprAST>(Lex.CharVal);
+        getNextToken();
+        return Res;
+    }
     case tok_length: return ParseStringBuiltin("LENGTH");
     case tok_mid:    return ParseStringBuiltin("MID");
     case tok_right:  return ParseStringBuiltin("RIGHT");
@@ -176,6 +217,16 @@ std::unique_ptr<ExprAST> Parser::ParseUnary() {
         if (!Operand) return nullptr;
         return std::make_unique<UnaryExprAST>(tok_not, std::move(Operand));
     }
+
+    if (CurTok == '-') {
+        int Line = Lex.getLine();
+        getNextToken();
+        auto Operand = ParseUnary();
+        if (!Operand) return nullptr;
+        auto Zero = std::make_unique<IntegerExprAST>(0);
+        return std::make_unique<BinaryExprAST>('-', std::move(Zero), std::move(Operand), Line);
+    }
+
     return ParsePrimary();
 }
 
@@ -268,26 +319,19 @@ std::unique_ptr<StmtAST> Parser::ParseDeclare() {
             return nullptr;
         }
         getNextToken();
-        
-        if (CurTok != tok_integer_kw) {
-             fprintf(stderr, "Error: Only INTEGER arrays supported currently\n");
-             return nullptr;
-        }
-        getNextToken();
-        
-        return std::make_unique<ArrayDeclareStmtAST>(Name, std::move(Bounds), "INTEGER");
-    } 
-    else {
-        std::string TypeStr;
-        if (CurTok == tok_integer_kw) TypeStr = "INTEGER";
-        else if (CurTok == tok_real_kw) TypeStr = "REAL";
-        else if (CurTok == tok_boolean_kw) TypeStr = "BOOLEAN";
-        else if (CurTok == tok_string_kw) TypeStr = "STRING";
-        else {
-            fprintf(stderr, "Error: Unknown type in declaration\n");
+
+        std::string TypeStr = ParseTypeName(false);
+        if (TypeStr.empty()) {
             return nullptr;
         }
-        getNextToken();
+        
+        return std::make_unique<ArrayDeclareStmtAST>(Name, std::move(Bounds), TypeStr);
+    } 
+    else {
+        std::string TypeStr = ParseTypeName(false);
+        if (TypeStr.empty()) {
+            return nullptr;
+        }
         return std::make_unique<DeclareStmtAST>(Name, TypeStr);
     }
 }

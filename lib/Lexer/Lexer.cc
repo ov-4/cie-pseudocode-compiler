@@ -1,9 +1,9 @@
 #include "cps/Lexer.h"
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <string>
-#include <algorithm>
 #include <cstdlib>
+#include <string>
 
 using namespace cps;
 
@@ -15,43 +15,63 @@ int Lexer::gettok() {
         LastChar = getchar();
     }
 
-    if (LastChar == '"' || LastChar == '\'') {
-        char QuoteType = LastChar;
-        StringVal = "";
-        
+    if (LastChar == '"') {
+        StringVal.clear();
         LastChar = getchar();
-        
-        while (LastChar != QuoteType && LastChar != EOF && LastChar != '\n') {
-            StringVal += LastChar;
+
+        while (LastChar != '"' && LastChar != EOF && LastChar != '\n') {
+            StringVal += static_cast<char>(LastChar);
             LastChar = getchar();
-        }
-        
-        if (LastChar == QuoteType) {
-            LastChar = getchar();
-        } else {
-            fprintf(stderr, "Error: Unterminated string or char literal\n");
         }
 
-        return tok_string_literal; 
+        if (LastChar == '"') {
+            LastChar = getchar();
+        } else {
+            fprintf(stderr, "Error: Unterminated string literal\n");
+        }
+
+        return tok_string_literal;
+    }
+
+    if (LastChar == '\'') {
+        int CharCode = getchar();
+        if (CharCode == EOF || CharCode == '\n') {
+            fprintf(stderr, "Error: Unterminated char literal\n");
+            return tok_eof;
+        }
+
+        int ClosingQuote = getchar();
+        if (ClosingQuote != '\'') {
+            fprintf(stderr, "Error: CHAR literal must contain exactly one character\n");
+            while (ClosingQuote != EOF && ClosingQuote != '\n' && ClosingQuote != '\'') {
+                ClosingQuote = getchar();
+            }
+        }
+
+        CharVal = static_cast<char>(CharCode);
+        StringVal.assign(1, CharVal);
+        LastChar = getchar();
+        return tok_char_literal;
     }
 
     if (isalpha(LastChar)) {
-        IdentifierStr = LastChar;
+        IdentifierStr = static_cast<char>(LastChar);
         while (isalnum((LastChar = getchar())) || LastChar == '_')
-            IdentifierStr += LastChar;
+            IdentifierStr += static_cast<char>(LastChar);
 
         if (IdentifierStr == "DECLARE") return tok_declare;
         if (IdentifierStr == "INTEGER") return tok_integer_kw;
-        if (IdentifierStr == "BOOLEAN") return tok_boolean_kw; 
-        if (IdentifierStr == "REAL")    return tok_real_kw; 
+        if (IdentifierStr == "BOOLEAN") return tok_boolean_kw;
+        if (IdentifierStr == "REAL")    return tok_real_kw;
         if (IdentifierStr == "STRING")  return tok_string_kw;
+        if (IdentifierStr == "CHAR")    return tok_char_kw;
 
         if (IdentifierStr == "TRUE") return tok_true;
         if (IdentifierStr == "FALSE") return tok_false;
 
         if (IdentifierStr == "INPUT") return tok_input;
         if (IdentifierStr == "OUTPUT") return tok_output;
-        
+
         if (IdentifierStr == "IF") return tok_if;
         if (IdentifierStr == "THEN") return tok_then;
         if (IdentifierStr == "ELSE") return tok_else;
@@ -60,10 +80,10 @@ int Lexer::gettok() {
         if (IdentifierStr == "WHILE") return tok_while;
         if (IdentifierStr == "DO") return tok_do;
         if (IdentifierStr == "ENDWHILE") return tok_endwhile;
-        
+
         if (IdentifierStr == "REPEAT") return tok_repeat;
         if (IdentifierStr == "UNTIL") return tok_until;
-        
+
         if (IdentifierStr == "FOR") return tok_for;
         if (IdentifierStr == "TO") return tok_to;
         if (IdentifierStr == "STEP") return tok_step;
@@ -74,7 +94,7 @@ int Lexer::gettok() {
 
         if (IdentifierStr == "DIV") return tok_div;
         if (IdentifierStr == "MOD") return tok_mod;
-        
+
         if (IdentifierStr == "AND") return tok_and;
         if (IdentifierStr == "OR") return tok_or;
         if (IdentifierStr == "NOT") return tok_not;
@@ -93,7 +113,7 @@ int Lexer::gettok() {
         if (IdentifierStr == "RETURN") return tok_return;
         if (IdentifierStr == "RETURNS") return tok_returns;
         if (IdentifierStr == "CALL") return tok_call;
-        
+
         if (IdentifierStr == "BYREF") return tok_byref;
         if (IdentifierStr == "BYVAL") return tok_byval;
 
@@ -104,7 +124,7 @@ int Lexer::gettok() {
         std::string NumStr;
         bool isReal = false;
         do {
-            NumStr += LastChar;
+            NumStr += static_cast<char>(LastChar);
             LastChar = getchar();
             if (LastChar == '.' && !isReal) {
                 isReal = true;
@@ -112,27 +132,27 @@ int Lexer::gettok() {
                 LastChar = getchar();
             }
         } while (isdigit(LastChar));
-        
+
         if (isReal) {
             RealVal = strtod(NumStr.c_str(), nullptr);
             return tok_number_real;
-        } else {
-            NumVal = strtoll(NumStr.c_str(), nullptr, 10);
-            return tok_number_int;
         }
+
+        NumVal = strtoll(NumStr.c_str(), nullptr, 10);
+        return tok_number_int;
     }
 
     if (LastChar == '<') {
         LastChar = getchar();
-        if (LastChar == '-') { // <-
+        if (LastChar == '-') {
             LastChar = getchar();
             return tok_assign;
         }
-        if (LastChar == '=') { // <=
+        if (LastChar == '=') {
             LastChar = getchar();
             return tok_le;
         }
-        if (LastChar == '>') { // <>
+        if (LastChar == '>') {
             LastChar = getchar();
             return tok_ne;
         }
@@ -141,7 +161,7 @@ int Lexer::gettok() {
 
     if (LastChar == '>') {
         LastChar = getchar();
-        if (LastChar == '=') { // >=
+        if (LastChar == '=') {
             LastChar = getchar();
             return tok_ge;
         }
@@ -173,7 +193,7 @@ int Lexer::gettok() {
             do {
                 LastChar = getchar();
             } while (LastChar != EOF && LastChar != '\n' && LastChar != '\r');
-            
+
             if (LastChar != EOF)
                 return gettok();
         } else {

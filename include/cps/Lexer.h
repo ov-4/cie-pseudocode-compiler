@@ -49,6 +49,8 @@ enum Token {
     tok_ucase = -35,
     tok_string_literal = -36,
     tok_left = -37,
+    tok_char_kw = -38,
+    tok_char_literal = -39,
 
     tok_identifier = -100,
     tok_number_int = -101,
@@ -83,6 +85,7 @@ public:
     std::string StringVal;
     int64_t NumVal;
     double RealVal;
+    char CharVal = '\0';
 
     int gettok();
     int getLine() const { return CurrentLine; }

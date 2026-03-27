@@ -1,8 +1,9 @@
 #include "cps/CodeGen.h"
 #include "cps/ArrayHandler.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/IR/Instructions.h" 
 #include "cps/Lexer.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Verifier.h"
+#include <cstdio>
 
 using namespace llvm;
 using namespace cps;
@@ -13,12 +14,24 @@ CodeGen::CodeGen() {
     TheContext = std::make_unique<LLVMContext>();
     TheModule = std::make_unique<Module>("cps_module", *TheContext);
     Builder = std::make_unique<IRBuilder<>>(*TheContext);
-    
+
+    Types = std::make_unique<TypeSystem>(*TheContext);
     RuntimeChecker = std::make_unique<RuntimeCheck>(*TheModule, *TheContext, *Builder);
-    
-    Arrays = std::make_unique<ArrayHandler>(*TheContext, *Builder, *TheModule, NamedValues, *RuntimeChecker);
-    
-    FuncGen = std::make_unique<FunctionGen>(*TheContext, *TheModule, *Builder, NamedValues);
+
+    Arrays = std::make_unique<ArrayHandler>(*TheContext,
+                                            *Builder,
+                                            *TheModule,
+                                            NamedValues,
+                                            Symbols,
+                                            *Types,
+                                            *RuntimeChecker);
+
+    FuncGen = std::make_unique<FunctionGen>(*TheContext,
+                                            *TheModule,
+                                            *Builder,
+                                            *Types,
+                                            NamedValues,
+                                            Symbols);
 
     IntHandler = std::make_unique<IntegerHandler>(*TheContext, *Builder, *TheModule, NamedValues);
     RealHelper = std::make_unique<RealHandler>(*TheContext, *Builder, *TheModule, NamedValues);
@@ -43,20 +56,316 @@ void CodeGen::SetupExternalFunctions() {
     PrintfFormatStr = Builder->CreateGlobalStringPtr("%lld\n", "fmt_nl", 0, TheModule.get());
     PrintfFloatFormatStr = Builder->CreateGlobalStringPtr("%f\n", "fmt_flt", 0, TheModule.get());
     PrintfStringFormatStr = Builder->CreateGlobalStringPtr("%s\n", "fmt_str", 0, TheModule.get());
+    PrintfCharFormatStr = Builder->CreateGlobalStringPtr("%c\n", "fmt_chr", 0, TheModule.get());
 
     ScanfFormatStr = Builder->CreateGlobalStringPtr("%lld", "fmt_in", 0, TheModule.get());
     ScanfFloatFormatStr = Builder->CreateGlobalStringPtr("%lf", "fmt_in_flt", 0, TheModule.get());
-    ScanfStringFormatStr = Builder->CreateGlobalStringPtr("%s", "fmt_in_str", 0, TheModule.get()); // NEW
+    ScanfStringFormatStr = Builder->CreateGlobalStringPtr("%s", "fmt_in_str", 0, TheModule.get());
 
     TrueStr = Builder->CreateGlobalStringPtr("TRUE", "str_true", 0, TheModule.get());
     FalseStr = Builder->CreateGlobalStringPtr("FALSE", "str_false", 0, TheModule.get());
-    
+    EmptyStringStr = Builder->CreateGlobalStringPtr("", "str_empty", 0, TheModule.get());
+
     Arrays->setupExternalFunctions();
 }
 
 AllocaInst *CodeGen::CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName) {
+    return CreateEntryBlockAlloca(TheFunction, Type::getInt64Ty(*TheContext), VarName);
+}
+
+AllocaInst *CodeGen::CreateEntryBlockAlloca(Function *TheFunction,
+                                            Type *AllocType,
+                                            const std::string &VarName) {
     IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
-    return TmpB.CreateAlloca(Type::getInt64Ty(*TheContext), nullptr, VarName);
+    return TmpB.CreateAlloca(AllocType, nullptr, VarName);
+}
+
+void CodeGen::registerSymbol(const std::string &Name,
+                             Value *Storage,
+                             const std::string &TypeName,
+                             bool IsArray) {
+    NamedValues[Name] = Storage;
+    Symbols[Name] = {Storage, TypeName, IsArray};
+}
+
+const SymbolInfo *CodeGen::getSymbolInfo(const std::string &Name) const {
+    auto It = Symbols.find(Name);
+    if (It == Symbols.end()) {
+        return nullptr;
+    }
+    return &It->second;
+}
+
+const TypeInfo *CodeGen::resolveType(const std::string &TypeName) const {
+    return Types->resolve(TypeName);
+}
+
+Type *CodeGen::getLLVMType(const std::string &TypeName) const {
+    return Types->getLLVMType(TypeName);
+}
+
+Value *CodeGen::getNamedValue(const std::string &Name) const {
+    auto It = NamedValues.find(Name);
+    return It == NamedValues.end() ? nullptr : It->second;
+}
+
+const TypeInfo *CodeGen::getExprTypeInfo(ExprAST *Expr) const {
+    if (!Expr) return nullptr;
+
+    if (dynamic_cast<IntegerExprAST*>(Expr)) return resolveType("INTEGER");
+    if (dynamic_cast<RealExprAST*>(Expr)) return resolveType("REAL");
+    if (dynamic_cast<BooleanExprAST*>(Expr)) return resolveType("BOOLEAN");
+    if (dynamic_cast<CharExprAST*>(Expr)) return resolveType("CHAR");
+    if (dynamic_cast<StringExprAST*>(Expr)) return resolveType("STRING");
+
+    if (auto *Var = dynamic_cast<VariableExprAST*>(Expr)) {
+        const SymbolInfo *Info = getSymbolInfo(Var->getName());
+        return Info ? resolveType(Info->TypeName) : nullptr;
+    }
+
+    if (auto *Arr = dynamic_cast<ArrayAccessExprAST*>(Expr)) {
+        const SymbolInfo *Info = getSymbolInfo(Arr->getName());
+        return Info ? resolveType(Info->TypeName) : nullptr;
+    }
+
+    if (auto *Unary = dynamic_cast<UnaryExprAST*>(Expr)) {
+        if (Unary->getOp() == tok_not) {
+            return resolveType("BOOLEAN");
+        }
+        return getExprTypeInfo(Unary->getOperand());
+    }
+
+    if (auto *Bin = dynamic_cast<BinaryExprAST*>(Expr)) {
+        switch (Bin->getOp()) {
+            case tok_eq:
+            case tok_ne:
+            case '<':
+            case '>':
+            case tok_le:
+            case tok_ge:
+            case tok_and:
+            case tok_or:
+                return resolveType("BOOLEAN");
+            case '&':
+                return resolveType("STRING");
+            default:
+                break;
+        }
+
+        const TypeInfo *L = getExprTypeInfo(Bin->getLHS());
+        const TypeInfo *R = getExprTypeInfo(Bin->getRHS());
+        if ((L && L->Kind == TypeKind::Real) || (R && R->Kind == TypeKind::Real)) {
+            return resolveType("REAL");
+        }
+        return resolveType("INTEGER");
+    }
+
+    if (auto *Call = dynamic_cast<CallExprAST*>(Expr)) {
+        const std::string &Name = Call->getCallee();
+        if (Name == "LENGTH" || Name == "ASC") return resolveType("INTEGER");
+        if (Name == "MID" || Name == "RIGHT" || Name == "LEFT" ||
+            Name == "LCASE" || Name == "UCASE" || Name == "CHR" ||
+            Name == "NUM_TO_STR") return resolveType("STRING");
+        if (Name == "IS_NUM") return resolveType("BOOLEAN");
+        if (Name == "STR_TO_NUM") return resolveType("REAL");
+
+        Function *CalleeF = TheModule->getFunction(Name);
+        if (!CalleeF) return resolveType("INTEGER");
+
+        Type *RetTy = CalleeF->getReturnType();
+        if (RetTy->isVoidTy()) return resolveType("VOID");
+        if (RetTy->isDoubleTy()) return resolveType("REAL");
+        if (RetTy->isIntegerTy(1)) return resolveType("BOOLEAN");
+        if (RetTy->isIntegerTy(8)) return resolveType("CHAR");
+        if (RetTy->isPointerTy()) return resolveType("STRING");
+        return resolveType("INTEGER");
+    }
+
+    return nullptr;
+}
+
+Value *CodeGen::coerceValueToType(Value *Val, const TypeInfo *TargetInfo) {
+    if (!Val || !TargetInfo || !TargetInfo->LLVMType) return nullptr;
+
+    if (Val->getType() == TargetInfo->LLVMType) {
+        return Val;
+    }
+
+    switch (TargetInfo->Kind) {
+        case TypeKind::Real:
+            if (Val->getType()->isDoubleTy()) return Val;
+            if (Val->getType()->isIntegerTy(1))
+                return Builder->CreateUIToFP(Val, Type::getDoubleTy(*TheContext), "bool_to_real");
+            if (Val->getType()->isIntegerTy(8))
+                return Builder->CreateUIToFP(Val, Type::getDoubleTy(*TheContext), "char_to_real");
+            if (Val->getType()->isIntegerTy())
+                return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), "int_to_real");
+            break;
+
+        case TypeKind::Integer:
+            if (Val->getType()->isIntegerTy(64)) return Val;
+            if (Val->getType()->isDoubleTy())
+                return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "real_to_int");
+            if (Val->getType()->isIntegerTy(1))
+                return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), "bool_to_int");
+            if (Val->getType()->isIntegerTy(8))
+                return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), "char_to_int");
+            if (Val->getType()->isIntegerTy())
+                return Builder->CreateSExtOrTrunc(Val, Type::getInt64Ty(*TheContext), "int_cast");
+            break;
+
+        case TypeKind::Boolean:
+            if (Val->getType()->isIntegerTy(1)) return Val;
+            if (Val->getType()->isIntegerTy())
+                return Builder->CreateICmpNE(Val, Constant::getNullValue(Val->getType()), "to_bool");
+            if (Val->getType()->isDoubleTy())
+                return Builder->CreateFCmpONE(Val, ConstantFP::get(*TheContext, APFloat(0.0)), "to_bool");
+            if (Val->getType()->isPointerTy())
+                return Builder->CreateICmpNE(Val,
+                                             ConstantPointerNull::get(cast<PointerType>(Val->getType())),
+                                             "ptr_to_bool");
+            break;
+
+        case TypeKind::Char:
+            if (Val->getType()->isIntegerTy(8)) return Val;
+            if (Val->getType()->isIntegerTy(1))
+                return Builder->CreateZExt(Val, Type::getInt8Ty(*TheContext), "bool_to_char");
+            if (Val->getType()->isDoubleTy())
+                return Builder->CreateFPToUI(Val, Type::getInt8Ty(*TheContext), "real_to_char");
+            if (Val->getType()->isIntegerTy())
+                return Builder->CreateTruncOrBitCast(Val, Type::getInt8Ty(*TheContext), "int_to_char");
+            break;
+
+        case TypeKind::String:
+            if (Val->getType()->isPointerTy()) return Val;
+            if (Val->getType()->isIntegerTy(1)) {
+                return Builder->CreateSelect(Val, TrueStr, FalseStr, "bool_to_str");
+            }
+            if (Val->getType()->isDoubleTy()) {
+                return StrConvHandler->emitNumToStr(Val, true);
+            }
+            if (Val->getType()->isIntegerTy(8)) {
+                Function *MallocF = TheModule->getFunction("malloc");
+                if (!MallocF) {
+                    FunctionType *MallocTy = FunctionType::get(PointerType::getUnqual(*TheContext),
+                                                               {Type::getInt64Ty(*TheContext)},
+                                                               false);
+                    MallocF = Function::Create(MallocTy,
+                                               Function::ExternalLinkage,
+                                               "malloc",
+                                               TheModule.get());
+                }
+                Value *Mem = Builder->CreateCall(MallocF,
+                                                 ConstantInt::get(*TheContext, APInt(64, 2)),
+                                                 "char_str");
+                Builder->CreateStore(Val, Mem);
+                Value *NullPtr = Builder->CreateInBoundsGEP(Type::getInt8Ty(*TheContext),
+                                                            Mem,
+                                                            ConstantInt::get(*TheContext, APInt(64, 1)));
+                Builder->CreateStore(ConstantInt::get(Type::getInt8Ty(*TheContext), 0), NullPtr);
+                return Mem;
+            }
+            if (Val->getType()->isIntegerTy()) {
+                Value *AsInt = coerceValueToType(Val, resolveType("INTEGER"));
+                return AsInt ? StrConvHandler->emitNumToStr(AsInt, false) : nullptr;
+            }
+            break;
+
+        case TypeKind::Void:
+            return nullptr;
+
+        case TypeKind::Custom:
+            if (Val->getType() == TargetInfo->LLVMType) return Val;
+            if (Val->getType()->isPointerTy() && TargetInfo->LLVMType->isPointerTy()) {
+                return Builder->CreateBitCast(Val, TargetInfo->LLVMType, "custom_ptr_cast");
+            }
+            break;
+    }
+
+    fprintf(stderr,
+            "Error: Cannot coerce value of LLVM type to target type %s\n",
+            TargetInfo->Name.c_str());
+    return nullptr;
+}
+
+void CodeGen::emitDeclareStmt(DeclareStmtAST *Stmt) {
+    const TypeInfo *Info = resolveType(Stmt->getType());
+    if (!Info || !Info->LLVMType || Info->isVoid()) {
+        fprintf(stderr, "Error: Unknown type %s\n", Stmt->getType().c_str());
+        return;
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Info->LLVMType, Stmt->getName());
+
+    Value *InitVal = nullptr;
+    if (Info->isString()) {
+        InitVal = EmptyStringStr;
+    } else {
+        InitVal = Types->getZeroValue(Info->Name);
+    }
+
+    if (InitVal) {
+        Builder->CreateStore(InitVal, Alloca);
+    }
+
+    registerSymbol(Stmt->getName(), Alloca, Info->Name, false);
+}
+
+void CodeGen::emitOutputValue(Value *Val, const TypeInfo *Info, bool AppendNewline) {
+    if (!Val || !Info) return;
+    if (!Info->Printable && Info->Kind == TypeKind::Custom) {
+        fprintf(stderr, "Error: OUTPUT for custom type %s is not implemented yet\n", Info->Name.c_str());
+        return;
+    }
+
+    std::vector<Value*> Args;
+    Value *Fmt = nullptr;
+
+    if (Info->isReal()) {
+        Fmt = AppendNewline
+            ? PrintfFloatFormatStr
+            : Builder->CreateGlobalStringPtr("%f", "fmt_flt_inline", 0, TheModule.get());
+        Args.push_back(Fmt);
+        Args.push_back(Val);
+    } else if (Info->isBoolean()) {
+        Value *BoolVal = coerceValueToType(Val, resolveType("BOOLEAN"));
+        Fmt = AppendNewline
+            ? PrintfStringFormatStr
+            : Builder->CreateGlobalStringPtr("%s", "fmt_str_inline", 0, TheModule.get());
+        Args.push_back(Fmt);
+        Args.push_back(Builder->CreateSelect(BoolVal, TrueStr, FalseStr));
+    } else if (Info->isString()) {
+        Value *StrVal = Val;
+        if (StrVal->getType()->isPointerTy()) {
+            Value *IsNull = Builder->CreateICmpEQ(StrVal,
+                                                  ConstantPointerNull::get(cast<PointerType>(StrVal->getType())),
+                                                  "str_is_null");
+            StrVal = Builder->CreateSelect(IsNull, EmptyStringStr, StrVal, "safe_str");
+        }
+        Fmt = AppendNewline
+            ? PrintfStringFormatStr
+            : Builder->CreateGlobalStringPtr("%s", "fmt_str_inline", 0, TheModule.get());
+        Args.push_back(Fmt);
+        Args.push_back(StrVal);
+    } else if (Info->isChar()) {
+        Value *CharVal = coerceValueToType(Val, resolveType("CHAR"));
+        Value *Promoted = Builder->CreateZExt(CharVal, Type::getInt32Ty(*TheContext), "char_for_printf");
+        Fmt = AppendNewline
+            ? PrintfCharFormatStr
+            : Builder->CreateGlobalStringPtr("%c", "fmt_chr_inline", 0, TheModule.get());
+        Args.push_back(Fmt);
+        Args.push_back(Promoted);
+    } else {
+        Value *IntVal = coerceValueToType(Val, resolveType("INTEGER"));
+        Fmt = AppendNewline
+            ? PrintfFormatStr
+            : Builder->CreateGlobalStringPtr("%lld", "fmt_int_inline", 0, TheModule.get());
+        Args.push_back(Fmt);
+        Args.push_back(IntVal);
+    }
+
+    Builder->CreateCall(PrintfFunc, Args);
 }
 
 void CodeGen::compile(const std::vector<std::unique_ptr<StmtAST>> &Statements) {
@@ -69,9 +378,10 @@ void CodeGen::compile(const std::vector<std::unique_ptr<StmtAST>> &Statements) {
         emitStmt(Stmt.get());
     }
 
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!Builder->GetInsertBlock()->getTerminator()) {
         Builder->CreateRet(ConstantInt::get(*TheContext, APInt(32, 0)));
-        
+    }
+
     verifyFunction(*F);
 }
 
@@ -94,19 +404,38 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         return BoolHandler->createLiteral(Bool->getVal());
     }
 
+    if (auto *Chr = dynamic_cast<CharExprAST*>(Expr)) {
+        return ConstantInt::get(Type::getInt8Ty(*TheContext), static_cast<unsigned char>(Chr->getVal()));
+    }
+
     if (auto *Str = dynamic_cast<StringExprAST*>(Expr)) {
         return StrHandler->createLiteral(Str->getVal());
     }
-    
+
     if (auto *Var = dynamic_cast<VariableExprAST*>(Expr)) {
-        Value *A = NamedValues[Var->getName()];
-        if (!A) {
+        const SymbolInfo *Info = getSymbolInfo(Var->getName());
+        if (!Info) {
             fprintf(stderr, "Error: Unknown variable name %s\n", Var->getName().c_str());
             return nullptr;
         }
-        
-        Type *AllocType = cast<AllocaInst>(A)->getAllocatedType();
-        return Builder->CreateLoad(AllocType, A, Var->getName().c_str());
+        if (Info->IsArray) {
+            return Info->Storage;
+        }
+
+        const TypeInfo *TypeInfo = resolveType(Info->TypeName);
+        if (!TypeInfo || !TypeInfo->LLVMType) {
+            fprintf(stderr, "Error: Unknown type for variable %s\n", Var->getName().c_str());
+            return nullptr;
+        }
+
+        Value *Loaded = Builder->CreateLoad(TypeInfo->LLVMType, Info->Storage, Var->getName().c_str());
+        if (TypeInfo->isString()) {
+            Value *IsNull = Builder->CreateICmpEQ(Loaded,
+                                                  ConstantPointerNull::get(cast<PointerType>(Loaded->getType())),
+                                                  "str_is_null");
+            Loaded = Builder->CreateSelect(IsNull, EmptyStringStr, Loaded, "safe_var_str");
+        }
+        return Loaded;
     }
 
     if (auto *ArrAcc = dynamic_cast<ArrayAccessExprAST*>(Expr)) {
@@ -116,14 +445,9 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
     if (auto *Unary = dynamic_cast<UnaryExprAST*>(Expr)) {
         Value *Operand = emitExpr(Unary->getOperand());
         if (!Operand) return nullptr;
-        
+
         if (Unary->getOp() == tok_not) {
-            if (Operand->getType()->isIntegerTy(64)) {
-                Operand = Builder->CreateICmpNE(Operand, ConstantInt::get(*TheContext, APInt(64, 0)), "tobool");
-            } else if (Operand->getType()->isDoubleTy()) {
-                Operand = Builder->CreateFCmpONE(Operand, ConstantFP::get(*TheContext, APFloat(0.0)), "tobool");
-            }
-            
+            Operand = coerceValueToType(Operand, resolveType("BOOLEAN"));
             return Builder->CreateNot(Operand, "nottmp");
         }
     }
@@ -132,7 +456,6 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         Value *L = emitExpr(Bin->getLHS());
         Value *R = emitExpr(Bin->getRHS());
         if (!L || !R) return nullptr;
-
         return ArithHandler->emitBinaryOp(Bin->getOp(), L, R, Bin->getLine());
     }
 
@@ -144,18 +467,18 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         }
         if (Name == "MID") {
             if (Call->getArgs().size() != 3) { fprintf(stderr, "MID expects 3 args\n"); return nullptr; }
-            return StrHandler->emitMid(emitExpr(Call->getArgs()[0].get()), 
-                                       emitExpr(Call->getArgs()[1].get()), 
+            return StrHandler->emitMid(emitExpr(Call->getArgs()[0].get()),
+                                       emitExpr(Call->getArgs()[1].get()),
                                        emitExpr(Call->getArgs()[2].get()));
         }
         if (Name == "RIGHT") {
             if (Call->getArgs().size() != 2) { fprintf(stderr, "RIGHT expects 2 args\n"); return nullptr; }
-            return StrHandler->emitRight(emitExpr(Call->getArgs()[0].get()), 
+            return StrHandler->emitRight(emitExpr(Call->getArgs()[0].get()),
                                          emitExpr(Call->getArgs()[1].get()));
         }
         if (Name == "LEFT") {
             if (Call->getArgs().size() != 2) { fprintf(stderr, "LEFT expects 2 args\n"); return nullptr; }
-            return StrHandler->emitLeft(emitExpr(Call->getArgs()[0].get()), 
+            return StrHandler->emitLeft(emitExpr(Call->getArgs()[0].get()),
                                         emitExpr(Call->getArgs()[1].get()));
         }
         if (Name == "LCASE") {
@@ -168,17 +491,27 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         }
         if (Name == "ASC") {
             if (Call->getArgs().size() != 1) return nullptr;
-            Value *StrPtr = emitExpr(Call->getArgs()[0].get());
-            Value *CharVal = Builder->CreateLoad(Type::getInt8Ty(*TheContext), StrPtr, "char_load");
-            return ChrHandler->emitAsc(CharVal);
+            Value *ArgVal = emitExpr(Call->getArgs()[0].get());
+            const TypeInfo *ArgType = getExprTypeInfo(Call->getArgs()[0].get());
+            Value *CharVal = nullptr;
+            if (ArgType && ArgType->isChar()) {
+                CharVal = coerceValueToType(ArgVal, resolveType("CHAR"));
+            } else {
+                CharVal = Builder->CreateLoad(Type::getInt8Ty(*TheContext), ArgVal, "char_load");
+            }
+            Value *AscVal = ChrHandler->emitAsc(CharVal);
+            return coerceValueToType(AscVal, resolveType("INTEGER"));
         }
         if (Name == "CHR") {
             if (Call->getArgs().size() != 1) return nullptr;
-            Value *CharVal = ChrHandler->emitChr(emitExpr(Call->getArgs()[0].get()));
+            Value *IntVal = coerceValueToType(emitExpr(Call->getArgs()[0].get()), resolveType("INTEGER"));
+            Value *CharVal = ChrHandler->emitChr(IntVal);
             Function *MallocF = TheModule->getFunction("malloc");
             Value *Mem = Builder->CreateCall(MallocF, ConstantInt::get(*TheContext, APInt(64, 2)));
             Builder->CreateStore(CharVal, Mem);
-            Value *NullPtr = Builder->CreateInBoundsGEP(Type::getInt8Ty(*TheContext), Mem, ConstantInt::get(*TheContext, APInt(64, 1)));
+            Value *NullPtr = Builder->CreateInBoundsGEP(Type::getInt8Ty(*TheContext),
+                                                        Mem,
+                                                        ConstantInt::get(*TheContext, APInt(64, 1)));
             Builder->CreateStore(ConstantInt::get(Type::getInt8Ty(*TheContext), 0), NullPtr);
             return Mem;
         }
@@ -189,8 +522,11 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
         if (Name == "NUM_TO_STR") {
             if (Call->getArgs().size() != 1) return nullptr;
             Value *NumV = emitExpr(Call->getArgs()[0].get());
-            bool isReal = NumV->getType()->isDoubleTy();
-            return StrConvHandler->emitNumToStr(NumV, isReal);
+            bool IsReal = NumV->getType()->isDoubleTy();
+            if (NumV->getType()->isIntegerTy(8)) {
+                NumV = coerceValueToType(NumV, resolveType("INTEGER"));
+            }
+            return StrConvHandler->emitNumToStr(NumV, IsReal);
         }
         if (Name == "STR_TO_NUM") {
             if (Call->getArgs().size() != 1) return nullptr;
@@ -199,28 +535,28 @@ Value *CodeGen::emitExpr(ExprAST *Expr) {
 
         Function *CalleeF = TheModule->getFunction(Call->getCallee());
         std::vector<Value*> Args;
-        
+
         for (unsigned i = 0; i < Call->getArgs().size(); ++i) {
             ExprAST *ArgExpr = Call->getArgs()[i].get();
-            bool isByRef = false;
+            bool IsByRef = false;
 
             if (CalleeF && i < CalleeF->arg_size()) {
                 if (CalleeF->getArg(i)->getType()->isPointerTy()) {
-                    isByRef = true;
+                    IsByRef = true;
                 }
             }
 
-            if (isByRef) {
+            if (IsByRef) {
                 if (auto *Var = dynamic_cast<VariableExprAST*>(ArgExpr)) {
-                    Value *Ptr = NamedValues[Var->getName()];
+                    Value *Ptr = getNamedValue(Var->getName());
                     if (!Ptr) {
                         fprintf(stderr, "Error: Unknown variable %s in BYREF call\n", Var->getName().c_str());
                         return nullptr;
                     }
                     Args.push_back(Ptr);
                 } else {
-                     fprintf(stderr, "Error: BYREF argument must be a variable.\n");
-                     return nullptr;
+                    fprintf(stderr, "Error: BYREF argument must be a variable.\n");
+                    return nullptr;
                 }
             } else {
                 Args.push_back(emitExpr(ArgExpr));
@@ -236,10 +572,7 @@ void CodeGen::emitIfStmt(IfStmtAST *Stmt) {
     Value *CondV = emitExpr(Stmt->getCond());
     if (!CondV) return;
 
-    if (CondV->getType()->isIntegerTy(64))
-        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "ifcond");
-    if (CondV->getType()->isIntegerTy(1))
-         CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(1, 0)), "ifcond");
+    CondV = coerceValueToType(CondV, resolveType("BOOLEAN"));
 
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
     BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
@@ -261,7 +594,7 @@ void CodeGen::emitIfStmt(IfStmtAST *Stmt) {
 
 void CodeGen::emitWhileStmt(WhileStmtAST *Stmt) {
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    
+
     BasicBlock *CondBB = BasicBlock::Create(*TheContext, "whilecond", TheFunction);
     BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "whileloop", TheFunction);
     BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "whilecont", TheFunction);
@@ -271,16 +604,13 @@ void CodeGen::emitWhileStmt(WhileStmtAST *Stmt) {
     Builder->SetInsertPoint(CondBB);
     Value *CondV = emitExpr(Stmt->getCond());
     if (!CondV) return;
-    if (CondV->getType()->isIntegerTy(64))
-        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "loopcond");
-    if (CondV->getType()->isIntegerTy(1))
-        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(1, 0)), "loopcond");
-    
+    CondV = coerceValueToType(CondV, resolveType("BOOLEAN"));
+
     Builder->CreateCondBr(CondV, LoopBB, AfterBB);
 
     Builder->SetInsertPoint(LoopBB);
     for (const auto &S : Stmt->getBody()) emitStmt(S.get());
-    
+
     if (!Builder->GetInsertBlock()->getTerminator())
         Builder->CreateBr(CondBB);
 
@@ -304,11 +634,7 @@ void CodeGen::emitRepeatStmt(RepeatStmtAST *Stmt) {
     Builder->SetInsertPoint(CondBB);
     Value *CondV = emitExpr(Stmt->getCond());
     if (!CondV) return;
-    
-    if (CondV->getType()->isIntegerTy(64))
-        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(64, 0)), "untilcond");
-    if (CondV->getType()->isIntegerTy(1))
-        CondV = Builder->CreateICmpNE(CondV, ConstantInt::get(*TheContext, APInt(1, 0)), "untilcond");
+    CondV = coerceValueToType(CondV, resolveType("BOOLEAN"));
 
     Builder->CreateCondBr(CondV, AfterBB, LoopBB);
 
@@ -318,15 +644,21 @@ void CodeGen::emitRepeatStmt(RepeatStmtAST *Stmt) {
 void CodeGen::emitForStmt(ForStmtAST *Stmt) {
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
     std::string VarName = Stmt->getVarName();
-    
-    Value *StartVal = emitExpr(Stmt->getStart());
-    if (!StartVal) return;
 
-    Value *Alloca = NamedValues[VarName];
-    if (!Alloca) {
+    const SymbolInfo *Symbol = getSymbolInfo(VarName);
+    if (!Symbol) {
         fprintf(stderr, "Error: Unknown variable in FOR loop %s\n", VarName.c_str());
         return;
     }
+    if (Symbol->TypeName != "INTEGER") {
+        fprintf(stderr, "Error: FOR loop variable %s must be INTEGER\n", VarName.c_str());
+        return;
+    }
+
+    Value *StartVal = coerceValueToType(emitExpr(Stmt->getStart()), resolveType("INTEGER"));
+    if (!StartVal) return;
+
+    Value *Alloca = Symbol->Storage;
     Builder->CreateStore(StartVal, Alloca);
 
     BasicBlock *CondBB = BasicBlock::Create(*TheContext, "forcond", TheFunction);
@@ -338,22 +670,19 @@ void CodeGen::emitForStmt(ForStmtAST *Stmt) {
     Builder->SetInsertPoint(CondBB);
 
     Value *CurVar = Builder->CreateLoad(Type::getInt64Ty(*TheContext), Alloca, VarName.c_str());
-    Value *EndVal = emitExpr(Stmt->getEnd());
+    Value *EndVal = coerceValueToType(emitExpr(Stmt->getEnd()), resolveType("INTEGER"));
     if (!EndVal) return;
 
-    bool isNegativeStep = false;
+    bool IsNegativeStep = false;
     if (Stmt->getStep()) {
         if (auto *Num = dynamic_cast<IntegerExprAST*>(Stmt->getStep())) {
-            if (Num->getVal() < 0) isNegativeStep = true;
+            if (Num->getVal() < 0) IsNegativeStep = true;
         }
     }
 
-    Value *CondV;
-    if (isNegativeStep) {
-        CondV = Builder->CreateICmpSGE(CurVar, EndVal, "forcond_ge");
-    } else {
-        CondV = Builder->CreateICmpSLE(CurVar, EndVal, "forcond_le");
-    }
+    Value *CondV = IsNegativeStep
+        ? Builder->CreateICmpSGE(CurVar, EndVal, "forcond_ge")
+        : Builder->CreateICmpSLE(CurVar, EndVal, "forcond_le");
 
     Builder->CreateCondBr(CondV, LoopBB, AfterBB);
 
@@ -363,13 +692,13 @@ void CodeGen::emitForStmt(ForStmtAST *Stmt) {
         Builder->CreateBr(IncBB);
 
     Builder->SetInsertPoint(IncBB);
-    Value *StepVal;
+    Value *StepVal = nullptr;
     if (Stmt->getStep()) {
-        StepVal = emitExpr(Stmt->getStep());
+        StepVal = coerceValueToType(emitExpr(Stmt->getStep()), resolveType("INTEGER"));
     } else {
         StepVal = ConstantInt::get(*TheContext, APInt(64, 1));
     }
-    
+
     Value *CurValForInc = Builder->CreateLoad(Type::getInt64Ty(*TheContext), Alloca, VarName.c_str());
     Value *NextVal = Builder->CreateAdd(CurValForInc, StepVal, "nextval");
     Builder->CreateStore(NextVal, Alloca);
@@ -385,7 +714,7 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         Arrays->emitArrayDeclare(ArrDecl, *this);
         return;
     }
-    
+
     if (auto *ArrAssign = dynamic_cast<ArrayAssignStmtAST*>(Stmt)) {
         Arrays->emitArrayAssign(ArrAssign, *this);
         return;
@@ -394,40 +723,39 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
     if (auto *FuncDef = dynamic_cast<FunctionDefAST*>(Stmt)) {
         BasicBlock *SavedBlock = Builder->GetInsertBlock();
 
-        FuncGen->emitFunctionDef(FuncDef, [this](StmtAST *S) { 
-            this->emitStmt(S); 
+        FuncGen->emitFunctionDef(FuncDef, [this](StmtAST *S) {
+            this->emitStmt(S);
         });
 
         if (SavedBlock) Builder->SetInsertPoint(SavedBlock);
-        
         return;
     }
 
-    else if (auto *Call = dynamic_cast<CallStmtAST*>(Stmt)) {
+    if (auto *Call = dynamic_cast<CallStmtAST*>(Stmt)) {
         Function *CalleeF = TheModule->getFunction(Call->getCallee());
         std::vector<Value*> Args;
-        
+
         for (unsigned i = 0; i < Call->getArgs().size(); ++i) {
             ExprAST *ArgExpr = Call->getArgs()[i].get();
-            bool isByRef = false;
-            
+            bool IsByRef = false;
+
             if (CalleeF && i < CalleeF->arg_size()) {
                 if (CalleeF->getArg(i)->getType()->isPointerTy()) {
-                    isByRef = true;
+                    IsByRef = true;
                 }
             }
 
-            if (isByRef) {
+            if (IsByRef) {
                 if (auto *Var = dynamic_cast<VariableExprAST*>(ArgExpr)) {
-                    Value *Ptr = NamedValues[Var->getName()];
+                    Value *Ptr = getNamedValue(Var->getName());
                     if (!Ptr) {
                         fprintf(stderr, "Error: Unknown variable %s in BYREF call\n", Var->getName().c_str());
                         return;
                     }
                     Args.push_back(Ptr);
                 } else {
-                     fprintf(stderr, "Error: BYREF argument must be a variable.\n");
-                     return;
+                    fprintf(stderr, "Error: BYREF argument must be a variable.\n");
+                    return;
                 }
             } else {
                 Args.push_back(emitExpr(ArgExpr));
@@ -437,7 +765,7 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
         return;
     }
 
-    else if (auto *Ret = dynamic_cast<ReturnStmtAST*>(Stmt)) {
+    if (auto *Ret = dynamic_cast<ReturnStmtAST*>(Stmt)) {
         Value *RetVal = nullptr;
         if (Ret->getRetVal()) {
             RetVal = emitExpr(Ret->getRetVal());
@@ -447,120 +775,106 @@ void CodeGen::emitStmt(StmtAST *Stmt) {
     }
 
     if (auto *Decl = dynamic_cast<DeclareStmtAST*>(Stmt)) {
-        if (Decl->getType() == "INTEGER") IntHandler->emitDeclare(Decl->getName());
-        else if (Decl->getType() == "REAL") RealHelper->emitDeclare(Decl->getName());
-        else if (Decl->getType() == "BOOLEAN") BoolHandler->emitDeclare(Decl->getName());
-        else if (Decl->getType() == "STRING") StrHandler->emitDeclare(Decl->getName());
-        else {
-            fprintf(stderr, "Unknown type %s\n", Decl->getType().c_str());
-        }
+        emitDeclareStmt(Decl);
+        return;
     }
-    else if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt)) {
+
+    if (auto *Assign = dynamic_cast<AssignStmtAST*>(Stmt)) {
+        const SymbolInfo *Info = getSymbolInfo(Assign->getName());
+        if (!Info) {
+            fprintf(stderr, "Error: Unknown variable name %s\n", Assign->getName().c_str());
+            return;
+        }
+        if (Info->IsArray) {
+            fprintf(stderr, "Error: Cannot assign array %s without indices\n", Assign->getName().c_str());
+            return;
+        }
+
         Value *Val = emitExpr(Assign->getExpr());
-        if (Val) {
-            Value *Alloca = NamedValues[Assign->getName()];
-            if (!Alloca) {
-                fprintf(stderr, "Error: Unknown variable name %s\n", Assign->getName().c_str());
-                return;
-            }
-            
-            AllocaInst *AI = cast<AllocaInst>(Alloca);
-            
-            if (AI->getAllocatedType() == Type::getDoubleTy(*TheContext) && Val->getType()->isIntegerTy(64)) {
-                Val = Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext));
-            }
+        const TypeInfo *TargetType = resolveType(Info->TypeName);
+        Val = coerceValueToType(Val, TargetType);
+        if (!Val) return;
 
-            if (AI->getAllocatedType() == Type::getInt64Ty(*TheContext) && Val->getType()->isDoubleTy()) {
-                Val = Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "double_to_int");
-            }
-            
-            if (AI->getAllocatedType() == Type::getInt64Ty(*TheContext) && Val->getType()->isIntegerTy(1)) {
-                 Val = Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext));
-            }
-
-            Builder->CreateStore(Val, Alloca);
-        }
+        Builder->CreateStore(Val, Info->Storage);
+        return;
     }
-    else if (auto *In = dynamic_cast<InputStmtAST*>(Stmt)) {
-        Value *Alloca = NamedValues[In->getName()];
-        if (Alloca) {
-            AllocaInst *AI = cast<AllocaInst>(Alloca);
-            std::vector<Value*> Args;
-            
-            if (AI->getAllocatedType()->isDoubleTy()) {
-                 Args.push_back(ScanfFloatFormatStr); 
-                 Args.push_back(Alloca); 
-                 Builder->CreateCall(ScanfFunc, Args);
-            } else if (AI->getAllocatedType()->isIntegerTy(1)) {
-                 AllocaInst *TempInt = CreateEntryBlockAlloca(Builder->GetInsertBlock()->getParent(), "tmp_bool_input");
-                 
-                 Args.push_back(ScanfFormatStr); 
-                 Args.push_back(TempInt);
-                 Builder->CreateCall(ScanfFunc, Args);
 
-                 Value *Val = Builder->CreateLoad(Type::getInt64Ty(*TheContext), TempInt);
-                 Value *BoolVal = Builder->CreateICmpNE(Val, ConstantInt::get(*TheContext, APInt(64, 0)), "bool_cast");
-                 
-                 Builder->CreateStore(BoolVal, Alloca);
-            } else if (AI->getAllocatedType()->isPointerTy()) {
-                 Value *BufSize = ConstantInt::get(*TheContext, APInt(64, 256));
-
-                 Args.push_back(ScanfStringFormatStr);
-
-                 AllocaInst *InputBuf = Builder->CreateAlloca(Type::getInt8Ty(*TheContext), ConstantInt::get(*TheContext, APInt(64, 1024)), "input_buf");
-                 Args.push_back(InputBuf);
-                 Builder->CreateCall(ScanfFunc, Args);
-
-                 Function *MallocF = TheModule->getFunction("malloc");
-                 if (MallocF) {
-                     Value *Mem = Builder->CreateCall(MallocF, ConstantInt::get(*TheContext, APInt(64, 1024)));
-                     Args[1] = Mem;
-                     Builder->CreateCall(ScanfFunc, Args);
-                     Builder->CreateStore(Mem, Alloca);
-                 }
-            } else {
-                 Args.push_back(ScanfFormatStr);
-                 Args.push_back(Alloca); 
-                 Builder->CreateCall(ScanfFunc, Args);
-            }
+    if (auto *In = dynamic_cast<InputStmtAST*>(Stmt)) {
+        const SymbolInfo *Info = getSymbolInfo(In->getName());
+        if (!Info) {
+            fprintf(stderr, "Error: Unknown variable name %s\n", In->getName().c_str());
+            return;
         }
-    }
-    else if (auto *Out = dynamic_cast<OutputStmtAST*>(Stmt)) {
-        bool handled = Arrays->tryEmitArrayOutput(Out->getExpr(), *this, PrintfFunc, PrintfFormatStr);
-        
-        if (!handled) {
-            Value *Val = emitExpr(Out->getExpr());
-            if (Val) {
-                std::vector<Value*> Args;
-                if (Val->getType()->isDoubleTy()) {
-                     Args.push_back(PrintfFloatFormatStr);
-                     Args.push_back(Val);
-                } else if (Val->getType()->isIntegerTy(1)) {
-                     Args.push_back(PrintfStringFormatStr);
-                     Value *StrPtr = Builder->CreateSelect(Val, TrueStr, FalseStr);
-                     Args.push_back(StrPtr);
-                } else if (Val->getType()->isPointerTy()) {
-                     Args.push_back(PrintfStringFormatStr);
-                     Args.push_back(Val);
-                } else {
-                     Args.push_back(PrintfFormatStr);
-                     Args.push_back(Val);
-                }
-                
-                Builder->CreateCall(PrintfFunc, Args);
-            }
+        if (Info->IsArray) {
+            fprintf(stderr, "Error: INPUT for entire array %s is not supported\n", In->getName().c_str());
+            return;
         }
+
+        const TypeInfo *TypeInfo = resolveType(Info->TypeName);
+        if (!TypeInfo) {
+            fprintf(stderr, "Error: Unknown type for INPUT %s\n", In->getName().c_str());
+            return;
+        }
+
+        std::vector<Value*> Args;
+        if (TypeInfo->isReal()) {
+            Args.push_back(ScanfFloatFormatStr);
+            Args.push_back(Info->Storage);
+            Builder->CreateCall(ScanfFunc, Args);
+        } else if (TypeInfo->isBoolean()) {
+            AllocaInst *TempInt = CreateEntryBlockAlloca(Builder->GetInsertBlock()->getParent(), "tmp_bool_input");
+            Args.push_back(ScanfFormatStr);
+            Args.push_back(TempInt);
+            Builder->CreateCall(ScanfFunc, Args);
+
+            Value *Val = Builder->CreateLoad(Type::getInt64Ty(*TheContext), TempInt);
+            Value *BoolVal = Builder->CreateICmpNE(Val, ConstantInt::get(*TheContext, APInt(64, 0)), "bool_cast");
+            Builder->CreateStore(BoolVal, Info->Storage);
+        } else if (TypeInfo->isString()) {
+            Function *MallocF = TheModule->getFunction("malloc");
+            Value *Mem = Builder->CreateCall(MallocF, ConstantInt::get(*TheContext, APInt(64, 1024)), "input_str");
+            Args.push_back(ScanfStringFormatStr);
+            Args.push_back(Mem);
+            Builder->CreateCall(ScanfFunc, Args);
+            Builder->CreateStore(Mem, Info->Storage);
+        } else if (TypeInfo->isChar()) {
+            Value *CharFmt = Builder->CreateGlobalStringPtr(" %c", "fmt_in_char", 0, TheModule.get());
+            Args.push_back(CharFmt);
+            Args.push_back(Info->Storage);
+            Builder->CreateCall(ScanfFunc, Args);
+        } else {
+            Args.push_back(ScanfFormatStr);
+            Args.push_back(Info->Storage);
+            Builder->CreateCall(ScanfFunc, Args);
+        }
+        return;
     }
-    else if (auto *IfStmt = dynamic_cast<IfStmtAST*>(Stmt)) {
+
+    if (auto *Out = dynamic_cast<OutputStmtAST*>(Stmt)) {
+        bool Handled = Arrays->tryEmitArrayOutput(Out->getExpr(), *this);
+        if (Handled) return;
+
+        Value *Val = emitExpr(Out->getExpr());
+        const TypeInfo *TypeInfo = getExprTypeInfo(Out->getExpr());
+        if (!TypeInfo) TypeInfo = resolveType("INTEGER");
+        emitOutputValue(Val, TypeInfo, true);
+        return;
+    }
+
+    if (auto *IfStmt = dynamic_cast<IfStmtAST*>(Stmt)) {
         emitIfStmt(IfStmt);
+        return;
     }
-    else if (auto *WhileStmt = dynamic_cast<WhileStmtAST*>(Stmt)) {
+    if (auto *WhileStmt = dynamic_cast<WhileStmtAST*>(Stmt)) {
         emitWhileStmt(WhileStmt);
+        return;
     }
-    else if (auto *RepeatStmt = dynamic_cast<RepeatStmtAST*>(Stmt)) {
+    if (auto *RepeatStmt = dynamic_cast<RepeatStmtAST*>(Stmt)) {
         emitRepeatStmt(RepeatStmt);
+        return;
     }
-    else if (auto *ForStmt = dynamic_cast<ForStmtAST*>(Stmt)) {
+    if (auto *ForStmt = dynamic_cast<ForStmtAST*>(Stmt)) {
         emitForStmt(ForStmt);
+        return;
     }
 }
