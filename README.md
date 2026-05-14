@@ -1,8 +1,27 @@
-# cie-pseudocode-compiler
+# CIE Pseudocode Compiler
 
 A compiler for CIE Pseudocode (A Level 9618 Computer Science)
 
 Details can be found here: [Pseudocode Guide for Teachers](https://www.cambridgeinternational.org/Images/697401-2026-pseudocode-guide-for-teachers.pdf)
+
+IDK WHAT HAPPENDED IT IS 100% AI-GENERATED DO NOT OPEN ANY ISSUES JUST CLONE AND FIX IT
+
+## Features
+
+- use LLVM, perhaps support all archs
+- built-in runtime checking to prevent illegal operations (eg. array, integer division), and prevent kernal to kill the program immediately
+- no Segmentation Fault (Core Dumped), beginner-friendly
+- array flatting with row-major (the standard of the industry), with `LowerBounds`, `UpperBounds`, etc. support any dimension with any lower/upper bounds
+- cache-friendly array (perhaps)
+- dynamic string handling, with full implementation of all CIE string functions, with high security
+- native support for BYREF/BYVAL using pointers
+- ultra-fast compiling & executing
+
+## TODO
+
+- search for `TODO` in my code
+- type
+- file
 
 
 ## Dependencies
@@ -62,3 +81,7 @@ ONLY TESTED ON DEBIAN (AND A BIT MINGW-W64)
 Copyright (C) _ov4
 
 This is free software; see the source for copying conditions.  There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+## Contributors
+
+ov4, ChatGPT, Gemini, Claude, et al.
